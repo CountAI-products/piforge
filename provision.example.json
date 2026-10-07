@@ -1,0 +1,53 @@
+{
+  "image": "https://downloads.raspberrypi.com/raspios_oldstable_arm64_latest",
+
+  "card": {
+    "user": "pi",
+    "password": "changeme",
+    "timezone": "UTC",
+    "keymap": "us",
+    "wifi_ssid": "",
+    "ssh_authorized_key": ""
+  },
+
+  "layout": {
+    "root_size": "32G",
+    "partitions": [
+      { "num": 3, "size": "30G" },
+      { "num": 5, "size": "10G" },
+      { "num": 6, "size": "10G" },
+      { "num": 7, "size": "rest" }
+    ]
+  },
+
+  "vm": {
+    "kernel": "~/.cache/piforge/vm-kernel/Image",
+    "cpus": 4,
+    "memory": "4G",
+    "ssh_port": 2222,
+    "disk_alias": "mmcblk0"
+  },
+
+  "shares": [
+    { "tag": "dockertars", "host_path": "~/docker_tar_file", "guest_path": "/mnt/docker_tar_file" }
+  ],
+
+  "package": {
+    "local_dir": "~/my-install-scripts",
+    "include": ["."],
+    "guest_dir": "/root/install-package"
+  },
+
+  "install_cmd": "bash /root/install-package/install.sh",
+  "install_env": {},
+
+  "tailscale": {
+    "auth_key": "tskey-auth-REPLACE-ME",
+    "extra_args": []
+  },
+
+  "verify_cmds": [
+    "systemctl is-active docker",
+    "tailscale ip -4"
+  ]
+}

@@ -64,6 +64,11 @@ install -m 0755 check-requirements.sh %{buildroot}/opt/piforge/check-requirement
 install -m 0644 README.md %{buildroot}/opt/piforge/README.md
 install -m 0644 LICENSE %{buildroot}/opt/piforge/LICENSE
 install -m 0755 packaging/piforge-server-root %{buildroot}/opt/piforge/piforge-server-root
+install -m 0644 provision.py %{buildroot}/opt/piforge/provision.py
+install -m 0644 clone.py %{buildroot}/opt/piforge/clone.py
+install -m 0644 provision.example.json %{buildroot}/opt/piforge/provision.example.json
+install -D -m 0755 vm-kernel/build-vm-kernel.sh %{buildroot}/opt/piforge/vm-kernel/build-vm-kernel.sh
+mkdir -p %{buildroot}/opt/piforge/vendor && cp -r vendor/novnc %{buildroot}/opt/piforge/vendor/
 
 install -m 0755 packaging/piforge %{buildroot}%{_bindir}/piforge
 install -m 0644 packaging/debian/piforge.desktop %{buildroot}%{_datadir}/applications/piforge.desktop

@@ -41,7 +41,13 @@ cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/check-requirements.sh \
       "${REPO_DIR}"/README.md \
       "${REPO_DIR}"/LICENSE \
+      "${REPO_DIR}"/provision.py \
+      "${REPO_DIR}"/clone.py \
+      "${REPO_DIR}"/provision.example.json \
       "$SRC_STAGE/"
+mkdir -p "$SRC_STAGE/vm-kernel"
+cp -p "${REPO_DIR}/vm-kernel/build-vm-kernel.sh" "$SRC_STAGE/vm-kernel/"
+mkdir -p "$SRC_STAGE/vendor" && cp -r "${REPO_DIR}/vendor/novnc" "$SRC_STAGE/vendor/"
 mkdir -p "$SRC_STAGE/packaging/debian"
 cp -p "${SELF_DIR}/piforge" "${SELF_DIR}/piforge-server-root" "${SELF_DIR}/piforge.svg" "$SRC_STAGE/packaging/"
 cp -p "${SELF_DIR}/debian/piforge.desktop" \

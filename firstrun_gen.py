@@ -64,8 +64,14 @@ else
    echo "@@TZ@@" >/etc/timezone
    dpkg-reconfigure -f noninteractive tzdata
 fi
-rm -f /boot/firstrun.sh
-sed -i 's| systemd.run.*||g' /boot/cmdline.txt
+# The boot partition is /boot/firmware on Bookworm and later, /boot before.
+for FWLOC in /boot/firmware /boot; do
+   if [ -f "$FWLOC/firstrun.sh" ]; then
+      rm -f "$FWLOC/firstrun.sh"
+      sed -i 's| systemd.run.*||g' "$FWLOC/cmdline.txt"
+      break
+   fi
+done
 exit 0
 """
 

@@ -34,8 +34,8 @@ which CI can't do). What CI *can* and does check on every PR:
 Run the same checks locally before pushing — they're fast:
 
 ```bash
-bash -n *.sh packaging/piforge packaging/*.sh
-python3 -c "import ast; [ast.parse(open(f).read(), filename=f) for f in ['server.py','firstrun_gen.py']]"
+bash -n *.sh vm-kernel/*.sh packaging/piforge packaging/*.sh
+python3 -c "import ast; [ast.parse(open(f).read(), filename=f) for f in ['server.py','firstrun_gen.py','provision.py']]"
 node -e "new Function(require('fs').readFileSync('index.html','utf8').match(/<script>([\s\S]*)<\/script>/)[1])"
 ```
 

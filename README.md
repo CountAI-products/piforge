@@ -22,6 +22,8 @@ kits, workshops, IoT fleets, cluster builds.
 - [Web UI (recommended, fastest)](#web-ui-recommended-fastest)
 - [CLI only (no browser, no server)](#cli-only-no-browser-no-server)
 - [Injecting config into an already-flashed card](#injecting-config-into-an-already-flashed-card)
+- [Full provisioning in a VM](#full-provisioning-in-a-vm)
+- [Cloning a finished card](#cloning-a-finished-card)
 - [Config field reference](#config-field-reference)
 - [Safety](#safety)
 - [Project layout](#project-layout)
@@ -268,6 +270,124 @@ sudo ./inject-config.sh /dev/sda            # finds and mounts the boot partitio
 Optionally pass a hostname as a second argument to override the one in
 `config.json`.
 
+## Full provisioning in a VM
+
+Flashing gives you a card that boots to a login. `provision.py` goes further:
+it boots the card **on this PC** in a QEMU arm64 VM and runs your own install
+scripts inside it — packages, databases, Docker images, Tailscale — so the
+card is fully installed before it ever reaches a Pi. One card at a time, from
+the command line.
+
+What it does, in order (`--from <step>` resumes at any of them):
+
+| Step | What happens |
+|---|---|
+| `flash` | Writes the OS image (same cache as the web UI) |
+| `partition` | Grows root and adds the partitions in `layout`, keeping the disk ID so PARTUUIDs stay valid |
+| `inject` | Same `firstrun.sh` as the web UI (user, hostname, SSH keys), and turns off Pi OS's first-boot auto-resize |
+| `boot` | First boot in the VM applies `firstrun.sh` and reboots once; then waits for SSH on `127.0.0.1:<ssh_port>` |
+| `install` | Mounts host folders (`shares`, read-only 9p), copies `package` in, runs `install_cmd` as root |
+| `tailscale` | Installs Tailscale and joins with `auth_key` — the card keeps that identity and IP on the real Pi. Skipped when `auth_key` is empty (e.g. the card joins Tailscale on the Pi itself) |
+| `verify` | Runs every `verify_cmds` entry; any failure fails the card |
+| `finish` | Removes the VM-only files, powers the VM off cleanly, flushes the card — always runs, even after an error |
+
+Every card is logged under `~/rpi-images/provision/<hostname>-<time>/` (the
+run log plus the VM's serial console) and recorded in
+`~/rpi-images/provisioned-cards.csv` with its Tailscale IP.
+
+**What can't run in the VM:** anything that needs the Pi's hardware — kernel
+drivers for Pi add-ons, devices like `/dev/hailo0`, EEPROM, the hardware
+watchdog, or anything keyed to the Pi's own MAC address. The VM runs its own
+kernel, so `uname -r` is not the Pi's. Have `install_cmd` leave those steps
+for a first-boot service on the Pi.
+
+### In the app
+
+The **Full install** tab (next to **Flash cards**) does all of this without a
+terminal: a station check (QEMU, VM kernel — with a one-click **Build VM
+kernel**, Docker image folder, install scripts, password), the
+settings, and every inserted card with a hostname box, a partition **Layout** and **START**. Each card picks the largest layout that fits it (a layout that's too big can't be started); **➕** adds a new layout, saved with the settings for every card. Each card
+shows its live step, a log, **Stop** (powers the VM off cleanly), **Retry from**
+any step, and its Tailscale IP when done; 🧾 lists every card provisioned.
+
+To hand a ready-made station build to someone, put your settings in
+`provision.defaults.json` in the repo root (gitignored) and build the VM
+kernel before `./packaging/build-deb.sh` — the `.deb` then ships both, so a new
+station starts pre-configured. That file may hold the card password and
+Tailscale key: only give that `.deb` to people who may have them.
+
+### One-time setup
+
+```bash
+sudo apt install qemu-system-arm e2fsprogs util-linux xz-utils openssh-client \
+                 gcc-aarch64-linux-gnu make flex bison bc libssl-dev libelf-dev curl
+./vm-kernel/build-vm-kernel.sh     # ~15-40 min, once -> ~/.cache/piforge/vm-kernel/Image
+cp provision.example.json provision.json   # edit it; gitignored
+```
+
+The VM kernel is a plain upstream arm64 kernel with everything built in
+(no modules), since the card's `/lib/modules` only has Pi kernels.
+
+### Per card
+
+```bash
+sudo python3 provision.py --config provision.json --hostname mill-01 /dev/sdX
+```
+
+Only removable cards the web UI would list are accepted, and you're asked to
+type `yes` before anything is erased (`--yes` skips that). It's slow — the
+VM emulates ARM on x86 — so expect a full install to take hours rather than
+minutes. To do two cards at once, run two copies with different
+`vm.ssh_port` values in two config files.
+
+### Config fields
+
+| Field | Meaning |
+|---|---|
+| `image` | OS image URL (cached like the web UI) or a local `.img` / `.img.xz` |
+| `card` | Same fields as `config.json`: `user`, `password`, `timezone`, `keymap`, `ssh_authorized_key`, Wi-Fi |
+| `layout.root_size` | New size of the root partition (it can only grow) |
+| `layout.partitions` | Extra partitions: `num` 3 (primary), then 5, 6, ... (logical, in an extended partition 4); `size` like `30G`, or `"rest"` for the last one. They're created empty — format them from your install scripts |
+| `layouts` | Named layouts the app offers per card, e.g. `{"256 GB": {...}, "128 GB": {...}}`, each shaped like `layout`. The app writes the chosen one into that card's own settings as `layout`; the command line uses `layout` |
+| `vm.kernel` / `cpus` / `memory` / `ssh_port` | QEMU settings |
+| `vm.disk_alias` | In the VM the card is `/dev/vda`; this adds `/dev/<alias>` and `/dev/<alias>pN` symlinks for scripts that hardcode the Pi's name (default `mmcblk0`). VM-only |
+| `vm.keep_provision_key` | `true` keeps PiForge's own SSH key on the card (removed by default) |
+| `shares` | Host folders mounted read-only in the VM: `tag`, `host_path`, `guest_path` |
+| `package` | Copied into the VM before the install: `local_dir` + `include` (list of paths), or `zip_url`; lands in `guest_dir` |
+| `install_cmd` / `install_env` | Run as root in the VM, with these environment variables |
+| `tailscale` | `auth_key` (use a reusable, pre-approved, **tagged** key so devices don't expire) and `extra_args` for `tailscale up` |
+| `verify_cmds` | Shell commands run as root in the VM after everything; each must exit 0 |
+
+Always let `provision.py` finish (or run `--from finish`) before removing a
+card — pulling a card out from under a running VM corrupts it.
+
+## Cloning a finished card
+
+Instead of installing every card, make **one master card** (on a real Pi, the
+normal way), save it as an image, and write exact copies. The **Clone cards**
+tab does both:
+
+- **💾 Save image** reads the master (it isn't changed) into
+  `~/rpi-images/clones/<name>.img`: the partition table, FAT partitions in
+  full, and only the *used* blocks of each ext4 partition (`e2image -ra`), so
+  the image is about the size of the data.
+- **▶ Write copy** / **Write to all cards** writes it to blank cards, several
+  at once, with the same disk ID (PARTUUIDs in `cmdline.txt` and `fstab` stay
+  valid), then checks every ext4 partition.
+
+With e2fsprogs 1.47+ (Ubuntu 24.04) the image's last partition is shrunk to its
+data and grown to fill each copy, so copies fit any card big enough for the
+data. Older e2fsprogs (Ubuntu 22.04) can't check or resize current Pi OS ext4:
+images keep the master's size and copies need cards at least that big.
+
+Copies are identical to the master — hostname, machine-id, SSH host keys and
+anything tied to the master Pi (a license bound to its MAC, Tailscale
+identity) included. Give each Pi its own after the copy, on the Pi itself
+(for Supernova: `sn-pi-setup.sh` in the supernova-production repo).
+
+Command line: `sudo python3 clone.py read /dev/sdX --name master-v1`,
+`sudo python3 clone.py write /dev/sdY --name master-v1`, `python3 clone.py list`.
+
 ## Config field reference
 
 See `config.example.json` for the full set with safe defaults. Notable ones
@@ -309,6 +429,10 @@ the UI's **Save as**).
 | `firstrun_gen.py` | Single shared implementation of the `firstrun.sh` template (hostname, user, SSH keys, Wi-Fi, static IP, timezone, keyboard) — used by `server.py`, `inject-config.sh`, and `flash-all.sh` so there's one place to trust, not three |
 | `flash-all.sh` | CLI-only alternative using `rpi-imager --cli` |
 | `inject-config.sh` | Re-inject config into an already-flashed card |
+| `provision.py` | Full provisioning in a QEMU arm64 VM: flash, partition, install, Tailscale, verify |
+| `provision.example.json` | Template for `provision.py` — copy to `provision.json` and edit |
+| `clone.py` | Save a finished card as an image and write exact copies (the Clone cards tab) |
+| `vm-kernel/build-vm-kernel.sh` | Builds the arm64 kernel `provision.py` boots cards with |
 | `config.example.json` | Template — copy to `config.json` and edit |
 | `profiles.example.json` | Sample named presets — copy to `profiles.json`, or just build them from the UI |
 | `check-requirements.sh` | Verifies all required tools are installed |

@@ -238,6 +238,61 @@
   }
   .modal-close:hover { color: var(--ink); }
   .modal-body { padding: 1rem 1.2rem; overflow-y: auto; min-height: 0; }
+  /* ---- view tabs + Full install screen ---- */
+  .tabs { display: flex; gap: 0.3rem; background: rgba(0,0,0,0.14); border-radius: 10px; padding: 0.2rem; }
+  .tabs button {
+    font: inherit; font-size: 0.9rem; font-weight: 650; color: rgba(255,255,255,0.8);
+    background: none; border: none; border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer;
+  }
+  .tabs button.active { background: #fff; color: var(--red); }
+  .tabs button:not(.active):hover { color: #fff; }
+
+  ul.checklist { list-style: none; margin: 0; padding: 0; }
+  ul.checklist li { display: flex; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  ul.checklist li:last-child { border-bottom: none; }
+  ul.checklist .mark { flex: none; width: 1.2rem; font-weight: 800; }
+  ul.checklist .ok .mark { color: var(--go); }
+  ul.checklist .bad .mark { color: var(--bad); }
+  ul.checklist li.tar { align-items: center; }
+  ul.checklist li.tar > span { flex: 1; min-width: 0; }
+  ul.checklist .detail { display: block; color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+
+  .steps { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
+  .steps span {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 0.2rem 0.45rem; border-radius: 6px; background: var(--line); color: var(--muted);
+  }
+  .steps span.done { background: #E4F5E6; color: var(--go); }
+  .steps span.now { background: var(--red-tint); color: var(--red); }
+  .steps span.failed { background: #FCE4E4; color: var(--bad); }
+  .pvhost { display: flex; gap: 0.5rem; margin-top: 0.55rem; align-items: center; }
+  .pvhost select { max-width: 16rem; }
+  .pvhost select[data-layout] { max-width: 20rem; }
+  .pvhost select[data-clpick], #cl_all_image { max-width: 24rem; }
+  .pvhost input { max-width: 14rem; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  button.go {
+    font: inherit; font-weight: 700; color: #fff; background: var(--go); border: none;
+    border-radius: 8px; padding: 0.55rem 0.9rem; cursor: pointer; white-space: nowrap;
+  }
+  button.go:hover:not(:disabled) { background: var(--go-press); }
+  button.go:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
+  .bigip { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.5rem; font-weight: 800; color: var(--go); margin-top: 0.3rem; }
+  .screen-tabs { display: flex; gap: 0.4rem; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid var(--line); }
+  .screen-tabs button.on { background: var(--muted); color: #fff; }
+  .vmdesktop { height: min(70vh, 640px); background: #000; border-radius: 0 0 12px 12px; overflow: hidden; }
+  pre.vmscreen {
+    margin: 0; height: min(70vh, 640px); overflow-y: auto; padding: 0.8rem 1rem;
+    background: #0b0f0c; color: #d7e3d9; font-size: 0.78rem; line-height: 1.35;
+    font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+    border-radius: 0 0 12px 12px;
+  }
+  pre.log {
+    margin: 0; font-size: 0.75rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+    font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem;
+  }
+  textarea.json { min-height: 16rem; }
+  #view-provision .col { overflow-x: hidden; }
 </style>
 </head>
 <body>
@@ -257,12 +312,18 @@
     PiForge <span>· mass SD card installer</span>
   </div>
   <div class="right">
+    <nav class="tabs">
+      <button type="button" id="tab-flash" class="active">Flash cards</button>
+      <button type="button" id="tab-provision">Full install</button>
+      <button type="button" id="tab-clone">Clone cards</button>
+    </nav>
     <button type="button" class="icon-btn" id="btn-history" title="Flash history">🕘</button>
-    <div class="counter">Cards done: <b id="count">0</b></div>
+    <button type="button" class="icon-btn" id="btn-registry" title="Provisioned cards" style="display:none">🧾</button>
+    <div class="counter" id="flash-counter">Cards done: <b id="count">0</b></div>
   </div>
 </header>
 
-<main>
+<main id="view-flash">
   <div class="col">
     <section class="panel">
       <h2>Profile</h2>
@@ -395,8 +456,171 @@
   </div>
 </main>
 
-<footer>Auto-refresh every 2 s · only removable, non-system drives are shown ·
+<main id="view-provision" style="display:none">
+  <div class="col">
+    <section class="panel">
+      <h2>Station check</h2>
+      <ul class="checklist" id="pv_checks"><li>Loading…</li></ul>
+      <div class="btnrow" style="margin-top:0.8rem; align-items:center">
+        <button type="button" class="tiny" id="pv_build_kernel">🔧 Build VM kernel</button>
+        <button type="button" class="tiny" id="pv_kernel_log" style="display:none">📄 Build log</button>
+        <span class="hint" id="pv_kernel_msg" style="margin:0"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Settings</h2>
+      <label>Hostname prefix</label>
+      <input type="text" id="pv_prefix" placeholder="sn-">
+      <div class="hint">Each card gets the next number: sn-001, sn-002…</div>
+      <div class="row">
+        <div><label>Username</label><input type="text" id="pv_user" placeholder="supernova"></div>
+        <div><label>Password</label>
+          <div class="pwrap">
+            <input type="password" id="pv_password">
+            <button type="button" class="eye" data-for="pv_password" aria-label="Show password">👁</button>
+          </div>
+        </div>
+      </div>
+      <label>Tailscale auth key (optional)</label>
+      <div class="pwrap">
+        <input type="password" id="pv_tskey" placeholder="leave empty to skip">
+        <button type="button" class="eye" data-for="pv_tskey" aria-label="Show key">👁</button>
+      </div>
+      <div class="hint">Leave empty if the card's own first-boot scripts join Tailscale on the Pi. If set, use a reusable, pre-approved, tagged key.</div>
+      <label>Docker image folder (on this PC)</label>
+      <input type="text" id="pv_tar_dir" placeholder="/home/kniti/docker_tar_file">
+      <label>Docker images (installed on every card)</label>
+      <ul class="checklist" id="pv_tars"><li class="hint">Loading…</li></ul>
+      <div class="btnrow" style="margin-top:0.4rem; align-items:center">
+        <button type="button" class="tiny" id="pv_tar_add">➕ Add tar file</button>
+        <input type="file" id="pv_tar_file" accept=".tar,.tar.gz,.tgz" multiple style="display:none">
+        <span class="hint" id="pv_tar_msg" style="margin:0"></span>
+      </div>
+      <div class="hint">Only the images in these tar files (from <code>docker save</code>) are installed;
+        a container whose image isn't here is skipped. Nothing is pulled from Docker Hub.</div>
+      <label>Install scripts (zip URL, or a folder on this PC)</label>
+      <input type="text" id="pv_package" placeholder="http://…/super3nova.zip">
+      <label>Timezone</label>
+      <select id="pv_timezone"></select>
+      <div class="check" style="margin-top:0.7rem">
+        <input type="checkbox" id="pv_screen">
+        <span>Show the VM's desktop in 🖥 Screen (a virtual display; uses more CPU, so installs are slower)</span>
+      </div>
+      <details class="group">
+        <summary>Advanced — all settings (JSON)</summary>
+        <div class="body">
+          <textarea id="pv_json" class="json" spellcheck="false"></textarea>
+          <div class="hint">Partition layout, install command, checks, VM size. The fields above win over the same keys here.</div>
+        </div>
+      </details>
+      <div class="btnrow">
+        <button type="button" class="secondary" id="pv_save">💾 Save settings</button>
+        <button type="button" class="secondary" id="pv_reload">↺ Reload</button>
+      </div>
+      <div class="hint" id="pv_saved_hint"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+      <h2 style="flex:none">SD cards — full install <span class="scanstate" id="pv_state"></span></h2>
+      <div class="devgrid" id="pv_grid" style="flex:1; overflow-y:auto; min-height:0;"></div>
+      <div class="warnbox" style="flex:none">START erases the card, then installs everything in a virtual Pi on this PC.
+        It takes a long time — leave the card in until it says <b>safe to remove</b>.</div>
+    </section>
+  </div>
+</main>
+
+<main id="view-clone" style="display:none">
+  <div class="col">
+    <section class="panel">
+      <h2>Saved images</h2>
+      <ul class="checklist" id="cl_images"><li class="hint">Loading…</li></ul>
+      <div class="hint" id="cl_resize_note"></div>
+      <div class="hint" style="margin-top:0.8rem">
+        <b>How it works:</b> make one master card on a Pi, insert it here and press <b>💾 Save image</b>.
+        Then insert blank cards and write copies. Copies are exact, so each Pi still needs its own identity:
+        on the Pi, run <code>sudo /home/kniti/sn-pi-setup/sn-pi-setup.sh</code> (hostname, Tailscale,
+        license, EEPROM, checks).</div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+      <h2 style="flex:none">SD cards — clone <span class="scanstate" id="cl_state"></span></h2>
+      <div class="pvhost" style="flex:none; margin:0 0 0.6rem">
+        <select id="cl_all_image" aria-label="Image to write"></select>
+        <button type="button" class="go" id="cl_write_all">▶ Write to all cards</button>
+      </div>
+      <div class="devgrid" id="cl_grid" style="flex:1; overflow-y:auto; min-height:0;"></div>
+      <div class="warnbox" style="flex:none">Writing a copy erases the card. Saving an image only reads the
+        master — it is not changed. Leave a card in until it says <b>safe to remove</b>.</div>
+    </section>
+  </div>
+</main>
+
+<footer id="flash-footer">Auto-refresh every 2 s · only removable, non-system drives are shown ·
 all selected cards are written in parallel</footer>
+
+<div class="modal-overlay" id="pv_screen_modal" style="display:none">
+  <div class="modal" style="width:min(1100px, 96vw)">
+    <div class="modal-head">
+      <h3 id="pv_screen_title">🖥 VM screen</h3>
+      <button type="button" class="modal-close" id="pv_screen_close">✕</button>
+    </div>
+    <div class="screen-tabs">
+      <button type="button" class="tiny" id="pv_screen_tab_desktop">🖥 Desktop</button>
+      <button type="button" class="tiny" id="pv_screen_tab_console">⌨ Console</button>
+      <span class="hint" id="pv_screen_hint" style="margin:0"></span>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div class="vmdesktop" id="pv_screen_desktop" style="display:none"></div>
+      <pre class="vmscreen" id="pv_screen_pre"></pre>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pv_log_modal" style="display:none">
+  <div class="modal" style="width:min(1000px, 94vw)">
+    <div class="modal-head">
+      <h3 id="pv_log_title">Log</h3>
+      <button type="button" class="modal-close" id="pv_log_close">✕</button>
+    </div>
+    <div class="modal-body"><pre class="log" id="pv_log_pre"></pre></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pv_layout_modal" style="display:none">
+  <div class="modal" style="width:min(640px, 94vw)">
+    <div class="modal-head">
+      <h3>➕ New partition layout</h3>
+      <button type="button" class="modal-close" id="pv_layout_close">✕</button>
+    </div>
+    <div class="modal-body">
+      <label>Name</label>
+      <input type="text" id="pv_layout_name" placeholder="512 GB">
+      <label>Layout (JSON)</label>
+      <textarea id="pv_layout_json" class="json" spellcheck="false"></textarea>
+      <div class="hint"><code>root_size</code> is the new size of the root partition. In <code>partitions</code>,
+        <code>num</code> 3 is primary, then 5, 6, … are logical; <code>size</code> like <code>30G</code>,
+        or <code>"rest"</code> for the last one. It's saved with the settings, for every card.</div>
+      <div class="btnrow">
+        <button type="button" class="secondary" id="pv_layout_save">💾 Save layout</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pv_registry_modal" style="display:none">
+  <div class="modal" style="width:min(900px, 94vw)">
+    <div class="modal-head">
+      <h3>🧾 Provisioned cards</h3>
+      <button type="button" class="modal-close" id="pv_registry_close">✕</button>
+    </div>
+    <div class="modal-body" id="pv_registry_body"></div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="history_modal" style="display:none">
   <div class="modal">
@@ -881,6 +1105,662 @@ all selected cards are written in parallel</footer>
 
   $("btn-flash").addEventListener("click", () => startFlashing([...selected].sort()));
 
+
+  // ================================================================ Full install
+  // One card at a time per row: provision.py on the server flashes it, boots
+  // it in a QEMU virtual Pi, runs the install, joins Tailscale and verifies.
+  const PV_STEPS = ["flash", "partition", "inject", "boot", "install", "tailscale", "verify", "finish"];
+  const PV_STEP_LABEL = { flash: "Flash", partition: "Partitions", inject: "Setup", boot: "Boot VM",
+    install: "Install", tailscale: "Tailscale", verify: "Checks", finish: "Power off" };
+  const VIEW_KEY = "piForgeView";
+  let pvData = null, pvCfg = {}, pvLogTarget = null, pvLogTimer = null;
+  const pvHost = {};   // device -> hostname typed by the operator
+  const pvFrom = {};   // device -> step picked for a retry
+  const pvLayout = {}; // device -> partition layout picked by the operator
+  let pvLayoutDev = null; // card whose ➕ opened the new-layout dialog
+
+  function showView(view) {
+    if (!["flash", "provision", "clone"].includes(view)) view = "flash";
+    const fl = view === "flash", pv = view === "provision", cl = view === "clone";
+    $("view-flash").style.display = fl ? "" : "none";
+    $("flash-footer").style.display = fl ? "" : "none";
+    $("view-provision").style.display = pv ? "" : "none";
+    $("view-clone").style.display = cl ? "" : "none";
+    $("tab-flash").classList.toggle("active", fl);
+    $("tab-provision").classList.toggle("active", pv);
+    $("tab-clone").classList.toggle("active", cl);
+    $("btn-history").style.display = fl ? "" : "none";
+    $("flash-counter").style.display = fl ? "" : "none";
+    $("btn-registry").style.display = pv ? "" : "none";
+    try { localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ }
+    if (pv) pvPoll();
+    if (cl) clPoll();
+  }
+  $("tab-flash").addEventListener("click", () => showView("flash"));
+  $("tab-provision").addEventListener("click", () => showView("provision"));
+  $("tab-clone").addEventListener("click", () => showView("clone"));
+
+  // ---- settings: a few friendly fields over the full JSON ----
+  function pvShare(cfg) {
+    cfg.shares = cfg.shares || [];
+    let sh = cfg.shares.find(x => x.tag === "dockertars") || cfg.shares[0];
+    if (!sh) { sh = { tag: "dockertars", host_path: "", guest_path: "/mnt/docker_tar_file" }; cfg.shares.push(sh); }
+    return sh;
+  }
+
+  function pvFillForm(cfg) {
+    pvCfg = cfg;
+    const card = cfg.card || {}, ts = cfg.tailscale || {}, pkg = cfg.package || {};
+    $("pv_prefix").value = cfg.hostname_prefix || "";
+    $("pv_user").value = card.user || "";
+    $("pv_password").value = card.password || "";
+    $("pv_tskey").value = ts.auth_key || "";
+    $("pv_tar_dir").value = ((cfg.shares || [])[0] || {}).host_path || "";
+    $("pv_package").value = pkg.zip_url || pkg.local_dir || "";
+    if (card.timezone) setSelectValue($("pv_timezone"), card.timezone);
+    $("pv_screen").checked = !!(cfg.vm || {}).screen;
+    $("pv_json").value = JSON.stringify(cfg, null, 2);
+  }
+
+  function pvReadForm() {
+    let cfg;
+    try { cfg = JSON.parse($("pv_json").value || "{}"); }
+    catch (e) { alert("The advanced JSON is not valid: " + e.message); return null; }
+    cfg.hostname_prefix = $("pv_prefix").value.trim();
+    cfg.card = Object.assign(cfg.card || {}, {
+      user: $("pv_user").value.trim(), password: $("pv_password").value, timezone: $("pv_timezone").value });
+    cfg.tailscale = Object.assign(cfg.tailscale || {}, { auth_key: $("pv_tskey").value.trim() });
+    cfg.vm = Object.assign(cfg.vm || {}, { screen: $("pv_screen").checked });
+    const tar = $("pv_tar_dir").value.trim();
+    if (tar) pvShare(cfg).host_path = tar;
+    const pkgVal = $("pv_package").value.trim();
+    cfg.package = cfg.package || { guest_dir: "/root/sn-package" };
+    if (/^https?:\/\//.test(pkgVal)) { cfg.package.zip_url = pkgVal; delete cfg.package.local_dir; }
+    else if (pkgVal) { cfg.package.local_dir = pkgVal; delete cfg.package.zip_url; }
+    return cfg;
+  }
+
+  async function pvLoadSettings() {
+    const r = await (await fetch("/api/provision/settings")).json();
+    pvFillForm(r.config || {});
+    pvLoadTars();
+    $("pv_saved_hint").textContent = r.saved ? `Saved in ${r.path}` : "Not saved yet — review and press Save settings.";
+  }
+
+  $("pv_save").addEventListener("click", async () => {
+    const cfg = pvReadForm();
+    if (!cfg) return;
+    const res = await (await fetch("/api/provision/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: cfg }),
+    })).json();
+    if (res.error) { alert("Error: " + res.error); return; }
+    const btn = $("pv_save"), original = btn.textContent;
+    btn.textContent = "✓ Saved"; btn.classList.add("saved");
+    setTimeout(() => { btn.textContent = original; btn.classList.remove("saved"); }, 1600);
+    await pvLoadSettings();
+    pvPoll();
+  });
+  $("pv_reload").addEventListener("click", pvLoadSettings);
+
+  // ---- Docker image tars ----
+  async function pvLoadTars() {
+    let r;
+    try { r = await (await fetch("/api/provision/images")).json(); } catch { return; }
+    const ul = $("pv_tars");
+    ul.innerHTML = (r.tars || []).length ? r.tars.map(t => `<li class="tar">
+        <span><b>${esc(t.name)}</b><span class="detail">${esc(t.size_h)} · ${
+          t.images ? esc(t.images.join(", ") || "no image tags") : "⚠ not a Docker image tar"}</span></span>
+        <button type="button" class="tiny danger" data-tardel="${esc(t.name)}" title="Remove">✕</button></li>`).join("")
+      : `<li class="hint">No tar files${r.folder ? ` in ${esc(r.folder)}` : ""} yet. Add one with ➕.</li>`;
+    ul.querySelectorAll("button[data-tardel]").forEach(b => b.addEventListener("click", async () => {
+      if (!confirm(`Remove ${b.dataset.tardel}? It won't be installed on new cards.`)) return;
+      const res = await (await fetch("/api/provision/images/delete", {
+        method: "POST", body: JSON.stringify({ name: b.dataset.tardel }) })).json();
+      if (res.error) alert("Error: " + res.error);
+      pvLoadTars(); pvPoll();
+    }));
+  }
+
+  function pvUploadTar(file) {
+    return new Promise(resolve => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/provision/images/upload?name=" + encodeURIComponent(file.name));
+      xhr.upload.onprogress = ev => {
+        if (ev.lengthComputable) $("pv_tar_msg").textContent = `Adding ${file.name}… ${Math.round(ev.loaded * 100 / ev.total)}%`;
+      };
+      xhr.onload = () => {
+        let res = {};
+        try { res = JSON.parse(xhr.responseText); } catch { res = { error: `HTTP ${xhr.status}` }; }
+        if (res.error) alert("Error: " + res.error);
+        resolve(!res.error);
+      };
+      xhr.onerror = () => { alert(`Adding ${file.name} failed.`); resolve(false); };
+      xhr.send(file);
+    });
+  }
+
+  $("pv_tar_add").addEventListener("click", () => $("pv_tar_file").click());
+  $("pv_tar_file").addEventListener("change", async e => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    for (const f of files) {
+      const ok = await pvUploadTar(f);
+      $("pv_tar_msg").textContent = ok ? `✓ Added ${f.name}` : "";
+    }
+    pvLoadTars(); pvPoll();
+  });
+
+  // ---- station check ----
+  function pvRenderChecks() {
+    const checks = pvData.checks || [];
+    $("pv_checks").innerHTML = checks.map(c => `<li class="${c.ok ? "ok" : "bad"}">
+      <span class="mark">${c.ok ? "✓" : "✗"}</span>
+      <span>${esc(c.label)}${c.detail ? `<span class="detail">${esc(c.detail)}</span>` : ""}</span></li>`).join("");
+    const kb = pvData.kernel_build || {};
+    const kernelOk = checks.some(c => c.key === "kernel" && c.ok);
+    $("pv_build_kernel").style.display = kernelOk && kb.state !== "running" ? "none" : "";
+    $("pv_build_kernel").disabled = kb.state === "running";
+    $("pv_build_kernel").textContent = kb.state === "running" ? "Building…" : "🔧 Build VM kernel";
+    $("pv_kernel_log").style.display = kb.state && kb.state !== "idle" ? "" : "none";
+    $("pv_kernel_msg").textContent = kb.message || (kernelOk ? "" : "One time, 15-40 min.");
+  }
+
+  $("pv_build_kernel").addEventListener("click", async () => {
+    if (!confirm("Build the VM kernel now? It takes 15-40 minutes and needs the build tools installed.")) return;
+    const res = await (await fetch("/api/provision/build-kernel", { method: "POST", body: "{}" })).json();
+    if (res.error) alert("Error: " + res.error);
+    pvPoll();
+  });
+  $("pv_kernel_log").addEventListener("click", () => pvOpenLog("kernel"));
+
+  // ---- cards ----
+  function pvReady() {
+    return (pvData.checks || []).every(c => c.ok) && !pvData.flashing;
+  }
+
+  function pvStepsHtml(job) {
+    const cur = PV_STEPS.indexOf(job.step);
+    return `<div class="steps">${PV_STEPS.map((st, i) => {
+      let cls = i < cur ? "done" : i === cur ? (job.state === "running" ? "now pulse"
+        : job.state === "done" ? "done" : "failed") : "";
+      if (job.state === "done") cls = "done";
+      return `<span class="${cls}">${esc(PV_STEP_LABEL[st])}</span>`;
+    }).join("")}</div>`;
+  }
+
+  // ---- partition layout per card ----
+  const gib = bytes => (bytes / 2 ** 30).toFixed(1);
+
+  function pvLayoutName(d, job) {
+    const all = pvData.layouts || [];
+    const picked = pvLayout[d.device] ?? (job && job.layout);
+    if (picked && all.some(l => l.name === picked)) return picked;
+    // Default: the largest layout that fits this card (the list is smallest first).
+    const fit = all.filter(l => l.min_bytes != null && l.min_bytes <= d.size);
+    return ((fit.length ? fit[fit.length - 1] : all[0]) || {}).name || "";
+  }
+
+  function pvLayoutFits(d, name) {
+    const l = (pvData.layouts || []).find(x => x.name === name);
+    return !l || (l.min_bytes != null && l.min_bytes <= d.size);
+  }
+
+  function pvLayoutHtml(d, name) {
+    const all = pvData.layouts || [];
+    const opts = all.map(l => {
+      const note = l.min_bytes == null ? "invalid"
+        : l.min_bytes <= d.size ? `≥ ${gib(l.min_bytes)} GiB` : "too big";
+      return `<option value="${esc(l.name)}" ${l.name === name ? "selected" : ""}>Layout: ${esc(l.name)} (${note})</option>`;
+    }).join("");
+    return `<div class="pvhost">${all.length ? `<select data-layout="${esc(d.device)}" aria-label="Partition layout">${opts}</select>` : ""}
+      <button type="button" class="tiny" data-addlayout="${esc(d.device)}" title="Add a partition layout">➕</button></div>
+      ${pvLayoutFits(d, name) ? "" : `<div class="hint">This layout doesn't fit this ${esc(d.size_h)} card. Pick a smaller one or add one with ➕.</div>`}`;
+  }
+
+  function pvCardHtml(d) {
+    const job = (pvData.jobs || {})[d.device];
+    const st = job ? job.state : "";
+    const layout = pvLayoutName(d, job);
+    const canStart = pvReady() && pvLayoutFits(d, layout);
+    const head = `<div class="devname">${esc(d.device)}${job ? ` <span>· ${esc(job.hostname)}</span>` : ""}</div>
+      <div class="devmeta">${esc(d.model)} · ${esc(d.size_h)}${d.tran ? " · " + esc(d.tran) : ""}</div>
+      ${d.has_data && !job ? `<div class="databadge">⚠ has data: ${esc((d.fstypes || []).join(", "))}</div>` : ""}`;
+    let body = "", side = "";
+    if (!job) {
+      const host = pvHost[d.device] ?? pvData.next_hostname;
+      body = `<div class="pvhost">
+        <input type="text" data-host="${esc(d.device)}" value="${esc(host)}" aria-label="Hostname">
+        <button type="button" class="go" data-start="${esc(d.device)}" ${canStart ? "" : "disabled"}>▶ START</button></div>
+        ${pvLayoutHtml(d, layout)}
+        ${pvReady() ? "" : `<div class="hint">Fix the ✗ items in Station check first.</div>`}`;
+    } else {
+      body = pvStepsHtml(job) + `<div class="devmsg">${esc(job.message || "")}</div>`
+        + (job.ip ? `<div class="bigip">${esc(job.ip)}</div>` : "")
+        + `<div class="hint">${esc(job.elapsed || "")}</div>`;
+      if (st === "error" || st === "cancelled") {
+        const from = pvFrom[d.device] || (st === "error" && job.step !== "finish" ? job.step : "flash");
+        body += `<div class="pvhost">
+          <select data-from="${esc(d.device)}">${PV_STEPS.filter(x => x !== "finish").map(x =>
+            `<option value="${x}" ${x === from ? "selected" : ""}>Retry from: ${esc(PV_STEP_LABEL[x])}</option>`).join("")}</select>
+          <button type="button" class="go" data-retry="${esc(d.device)}" ${canStart ? "" : "disabled"}>↻ Retry</button></div>
+          ${pvLayoutHtml(d, layout)}`;
+      }
+      side = `<span class="tag ${st === "running" ? "writing pulse" : st === "done" ? "done" : st === "error" ? "error" : "cancelled"}">${
+        esc(st === "running" ? "WORKING" : st.toUpperCase())}</span>
+        <button type="button" class="tiny" data-screen="${esc(d.device)}">🖥 Screen</button>
+        <button type="button" class="tiny" data-log="${esc(d.device)}">📄 Log</button>
+        ${st === "running" ? `<button type="button" class="tiny danger" data-stop="${esc(d.device)}">⏹ Stop</button>` : ""}`;
+    }
+    const cls = st === "done" ? "state-done" : st === "error" ? "state-error" : st === "cancelled" ? "state-cancelled" : "";
+    return `<div class="dev ${cls}"><div class="devinfo">${head}${body}</div><div class="devside">${side}</div></div>`;
+  }
+
+  function pvRender() {
+    pvRenderChecks();
+    const running = Object.values(pvData.jobs || {}).filter(j => j.state === "running").length;
+    $("pv_state").textContent = running ? `· ${running} working` : "";
+    const grid = $("pv_grid");
+    // Redrawing would close a dropdown the operator has open; wait for it.
+    if (grid.contains(document.activeElement) && document.activeElement.tagName === "SELECT") return;
+    // Keep the operator's cursor in a hostname box across the 2 s refresh.
+    const focused = document.activeElement && document.activeElement.dataset
+      ? document.activeElement.dataset.host : null;
+    const caret = focused ? document.activeElement.selectionStart : null;
+    const devs = pvData.devices || [];
+    grid.innerHTML = devs.length ? devs.map(pvCardHtml).join("") : `<div class="empty">
+      <div class="bigicon pulse">🗂️</div><h3>Insert an SD card</h3>
+      <p>Each card is erased, then fully installed in a virtual Pi on this PC.</p></div>`;
+    grid.querySelectorAll("input[data-host]").forEach(inp => {
+      inp.addEventListener("input", () => { pvHost[inp.dataset.host] = inp.value; });
+      if (inp.dataset.host === focused) { inp.focus(); inp.setSelectionRange(caret, caret); }
+    });
+    grid.querySelectorAll("select[data-from]").forEach(sel =>
+      sel.addEventListener("change", () => { pvFrom[sel.dataset.from] = sel.value; }));
+    grid.querySelectorAll("select[data-layout]").forEach(sel => sel.addEventListener("change", () => {
+      pvLayout[sel.dataset.layout] = sel.value;
+      sel.blur();
+      pvRender();
+    }));
+    grid.querySelectorAll("button[data-addlayout]").forEach(btn =>
+      btn.addEventListener("click", () => pvOpenLayout(btn.dataset.addlayout)));
+    const layoutOf = dev => pvLayoutName((pvData.devices || []).find(x => x.device === dev) || {}, (pvData.jobs || {})[dev]);
+    grid.querySelectorAll("button[data-start]").forEach(btn => btn.addEventListener("click", () => {
+      const dev = btn.dataset.start;
+      const input = grid.querySelector(`input[data-host="${CSS.escape(dev)}"]`);
+      pvStart(dev, (input ? input.value : "").trim(), "flash", layoutOf(dev));
+    }));
+    grid.querySelectorAll("button[data-retry]").forEach(btn => btn.addEventListener("click", () => {
+      const dev = btn.dataset.retry, job = pvData.jobs[dev];
+      const sel = grid.querySelector(`select[data-from="${CSS.escape(dev)}"]`);
+      pvStart(dev, job.hostname, sel ? sel.value : "flash", layoutOf(dev));
+    }));
+    grid.querySelectorAll("button[data-stop]").forEach(btn => btn.addEventListener("click", async () => {
+      if (!confirm("Stop this card? The virtual Pi is powered off cleanly; the card will be incomplete.")) return;
+      await fetch("/api/provision/stop", { method: "POST", body: JSON.stringify({ device: btn.dataset.stop }) });
+      pvPoll();
+    }));
+    grid.querySelectorAll("button[data-log]").forEach(btn => btn.addEventListener("click", () => pvOpenLog(btn.dataset.log)));
+    grid.querySelectorAll("button[data-screen]").forEach(btn => btn.addEventListener("click", () => pvOpenScreen(btn.dataset.screen)));
+  }
+
+  async function pvStart(dev, hostname, from, layout) {
+    if (!hostname) { alert("Enter a hostname for this card."); return; }
+    const d = (pvData.devices || []).find(x => x.device === dev) || {};
+    const erase = from === "flash" || from === "partition";
+    if (erase && !confirm(`PERMANENTLY ERASE ${dev}${d.has_data ? ` (contains: ${(d.fstypes || []).join(", ")})` : ""}\n` +
+                          `and fully install it as "${hostname}"${layout ? ` with the "${layout}" layout` : ""}?`)) return;
+    const res = await (await fetch("/api/provision/start", {
+      method: "POST", body: JSON.stringify({ device: dev, hostname, from, layout: layout || null }),
+    })).json();
+    if (res.error) { alert("Error: " + res.error); return; }
+    delete pvHost[dev]; delete pvFrom[dev];
+    pvPoll();
+  }
+
+  // ---- new partition layout (➕) ----
+  function pvOpenLayout(dev) {
+    pvLayoutDev = dev;
+    const d = (pvData.devices || []).find(x => x.device === dev) || {};
+    const cur = (pvData.layouts || []).find(l => l.name === pvLayoutName(d, (pvData.jobs || {})[dev]));
+    $("pv_layout_name").value = "";
+    $("pv_layout_json").value = JSON.stringify(
+      cur ? cur.layout : { root_size: "50G", partitions: [{ num: 3, size: "rest" }] }, null, 2);
+    $("pv_layout_modal").style.display = "flex";
+    $("pv_layout_name").focus();
+  }
+  const pvCloseLayout = () => { $("pv_layout_modal").style.display = "none"; };
+
+  $("pv_layout_save").addEventListener("click", async () => {
+    const name = $("pv_layout_name").value.trim();
+    if (!name) { alert("Give the layout a name, e.g. 512 GB."); return; }
+    let layout;
+    try { layout = JSON.parse($("pv_layout_json").value); }
+    catch (e) { alert("The layout JSON is not valid: " + e.message); return; }
+    const cfg = pvReadForm();
+    if (!cfg) return;
+    if (!cfg.layouts || !Object.keys(cfg.layouts).length) cfg.layouts = cfg.layout ? { Default: cfg.layout } : {};
+    if (cfg.layouts[name] && !confirm(`Replace the existing layout "${name}"?`)) return;
+    cfg.layouts[name] = layout;
+    const res = await (await fetch("/api/provision/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: cfg }),
+    })).json();
+    if (res.error) { alert("Error: " + res.error); return; }
+    if (pvLayoutDev) pvLayout[pvLayoutDev] = name;
+    pvCloseLayout();
+    await pvLoadSettings();
+    pvPoll();
+  });
+  $("pv_layout_close").addEventListener("click", pvCloseLayout);
+  $("pv_layout_modal").addEventListener("click", e => { if (e.target.id === "pv_layout_modal") pvCloseLayout(); });
+
+  async function pvPoll() {
+    if ($("view-provision").style.display === "none") return;
+    try {
+      pvData = await (await fetch("/api/provision/status")).json();
+      misses = 0; $("offline").style.display = "none";
+    } catch {
+      if (++misses > 4) $("offline").style.display = "block";
+      return;
+    }
+    if (pvData.error) return;
+    $("rootwarn").style.display = pvData.root ? "none" : "block";
+    pvRender();
+  }
+
+  // ---- clone cards ----
+  let clData = { images: [], jobs: {}, devices: [] };
+  const clName = {};    // device -> image name typed for "save"
+  const clPick = {};    // device -> image picked for "write"
+  const CL_STEPS = { read: ["table", "copy", "shrink"], write: ["table", "copy", "grow", "verify"] };
+  const CL_STEP_LABEL = { table: "Partition table", copy: "Copy data", shrink: "Shrink last partition",
+                          grow: "Grow last partition", verify: "Check" };
+  const clGiB = b => (b / 2 ** 30).toFixed(1);
+
+  function clUsable(img) { return !img.grow_last || clData.can_resize; }
+  function clFits(d, img) { return img && clUsable(img) && d.size >= img.min_card_bytes; }
+
+  function clImageOptions(d, picked) {
+    return (clData.images || []).map(img => `<option value="${esc(img.name)}" ${img.name === picked ? "selected" : ""}
+      ${!clUsable(img) || (d && !clFits(d, img)) ? "disabled" : ""}>${esc(img.name)} (${clGiB(img.image_bytes)} GiB${
+      !clUsable(img) ? ", needs Ubuntu 24.04+ to write" : d && !clFits(d, img) ? ", card too small" : ""})</option>`).join("");
+  }
+
+  function clRenderImages() {
+    const imgs = clData.images || [];
+    $("cl_images").innerHTML = imgs.length ? imgs.map(img => `<li class="tar">
+        <span><b>${esc(img.name)}</b><span class="detail">${clGiB(img.image_bytes)} GiB image · needs a card ≥ ${
+          clGiB(img.min_card_bytes)} GiB · ${clGiB(img.on_disk)} GiB on this PC · saved ${esc((img.created || "").replace("T", " "))}${
+          img.grow_last ? " · last partition grows to fill each card" : ""}${
+          clUsable(img) ? "" : " · ⚠ can't be written from this PC (needs e2fsprogs 1.47+, Ubuntu 24.04)"}</span></span>
+        <button type="button" class="tiny danger" data-cldel="${esc(img.name)}" title="Delete">✕</button></li>`).join("")
+      : `<li class="hint">No images yet. Insert a master card and press 💾 Save image.</li>`;
+    $("cl_images").querySelectorAll("button[data-cldel]").forEach(b => b.addEventListener("click", async () => {
+      if (!confirm(`Delete the image ${b.dataset.cldel} from this PC?`)) return;
+      const res = await (await fetch("/api/clone/delete", { method: "POST", body: JSON.stringify({ name: b.dataset.cldel }) })).json();
+      if (res.error) alert("Error: " + res.error);
+      clPoll();
+    }));
+    $("cl_resize_note").textContent = clData.can_resize ? "" :
+      "This PC's e2fsprogs is older than 1.47 (e.g. Ubuntu 22.04): images keep the master's size, so copies need " +
+      "cards at least as big as the master, and copies aren't filesystem-checked. Ubuntu 24.04 has neither limit.";
+    const all = $("cl_all_image"), keep = all.value;
+    all.innerHTML = clImageOptions(null, keep) || `<option value="">(no images yet)</option>`;
+    if (keep) all.value = keep;
+  }
+
+  function clCardHtml(d) {
+    const job = (clData.jobs || {})[d.device];
+    const st = job ? job.state : "";
+    const head = `<div class="devname">${esc(d.device)}${job ? ` <span>· ${job.action === "read" ? "saving" : "writing"} ${esc(job.name)}</span>` : ""}</div>
+      <div class="devmeta">${esc(d.model)} · ${esc(d.size_h)}${d.tran ? " · " + esc(d.tran) : ""}</div>`;
+    const ready = clData.root && !clData.flashing;
+    let body = "", side = "";
+    if (!job || st !== "running") {
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const name = clName[d.device] ?? `master-${today}`;
+      const picked = clPick[d.device] ?? ((clData.images || []).find(i => clFits(d, i)) || {}).name;
+      body = `<div class="pvhost">
+          <input type="text" data-clname="${esc(d.device)}" value="${esc(name)}" aria-label="Image name">
+          <button type="button" class="tiny" data-clread="${esc(d.device)}" ${ready ? "" : "disabled"}>💾 Save image</button></div>
+        <div class="pvhost">${(clData.images || []).length ? `<select data-clpick="${esc(d.device)}">${clImageOptions(d, picked)}</select>
+          <button type="button" class="go" data-clwrite="${esc(d.device)}" ${ready && picked ? "" : "disabled"}>▶ Write copy</button>` : ""}</div>
+        ${(clData.images || []).length && !picked ? `<div class="hint">No saved image fits this ${esc(d.size_h)} card.</div>` : ""}`;
+    }
+    if (job) {
+      const steps = CL_STEPS[job.action] || [];
+      const cur = steps.indexOf(job.step);
+      body = `<div class="steps">${steps.map((s, i) => `<span class="${st === "done" || i < cur ? "done"
+        : i === cur ? (st === "running" ? "now pulse" : "failed") : ""}">${esc(CL_STEP_LABEL[s])}</span>`).join("")}</div>`
+        + `<div class="devmsg">${st === "running" && job.part ? `${esc(job.part)}: ${job.percent ?? 0}% · ` : ""}${esc(job.message || "")}</div>`
+        + `<div class="hint">${esc(job.elapsed || "")}</div>` + (st === "running" ? "" : body);
+      side = `<span class="tag ${st === "running" ? "writing pulse" : st === "done" ? "done" : st === "error" ? "error" : "cancelled"}">${
+        esc(st === "running" ? "WORKING" : st === "done" ? "DONE" : st.toUpperCase())}</span>
+        <button type="button" class="tiny" data-cllog="${esc(d.device)}">📄 Log</button>
+        ${st === "running" ? `<button type="button" class="tiny danger" data-clstop="${esc(d.device)}">⏹ Stop</button>` : ""}`;
+    }
+    const cls = st === "done" ? "state-done" : st === "error" ? "state-error" : st === "cancelled" ? "state-cancelled" : "";
+    return `<div class="dev ${cls}"><div class="devinfo">${head}${body}</div><div class="devside">${side}</div></div>`;
+  }
+
+  function clRender() {
+    clRenderImages();
+    const running = Object.values(clData.jobs || {}).filter(j => j.state === "running").length;
+    $("cl_state").textContent = running ? `· ${running} working` : "";
+    const grid = $("cl_grid");
+    if (grid.contains(document.activeElement) && document.activeElement.tagName === "SELECT") return;
+    const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.clname : null;
+    const caret = focused ? document.activeElement.selectionStart : null;
+    const devs = clData.devices || [];
+    grid.innerHTML = devs.length ? devs.map(clCardHtml).join("") : `<div class="empty">
+      <div class="bigicon pulse">🗂️</div><h3>Insert an SD card</h3>
+      <p>A finished master card to save, or blank cards to write copies to.</p></div>`;
+    grid.querySelectorAll("input[data-clname]").forEach(inp => {
+      inp.addEventListener("input", () => { clName[inp.dataset.clname] = inp.value; });
+      if (inp.dataset.clname === focused) { inp.focus(); inp.setSelectionRange(caret, caret); }
+    });
+    grid.querySelectorAll("select[data-clpick]").forEach(sel => sel.addEventListener("change", () => {
+      clPick[sel.dataset.clpick] = sel.value; sel.blur(); clRender();
+    }));
+    grid.querySelectorAll("button[data-clread]").forEach(b => b.addEventListener("click", () => {
+      const dev = b.dataset.clread, inp = grid.querySelector(`input[data-clname="${CSS.escape(dev)}"]`);
+      clStart(dev, "read", (inp ? inp.value : "").trim());
+    }));
+    grid.querySelectorAll("button[data-clwrite]").forEach(b => b.addEventListener("click", () => {
+      const dev = b.dataset.clwrite, sel = grid.querySelector(`select[data-clpick="${CSS.escape(dev)}"]`);
+      clStart(dev, "write", sel ? sel.value : "");
+    }));
+    grid.querySelectorAll("button[data-clstop]").forEach(b => b.addEventListener("click", async () => {
+      if (!confirm("Stop this card? It will be incomplete.")) return;
+      await fetch("/api/clone/stop", { method: "POST", body: JSON.stringify({ device: b.dataset.clstop }) });
+      clPoll();
+    }));
+    grid.querySelectorAll("button[data-cllog]").forEach(b => b.addEventListener("click", () => pvOpenLog("clone:" + b.dataset.cllog)));
+  }
+
+  async function clStart(dev, action, name, ask = true) {
+    if (!name) { alert(action === "read" ? "Enter a name for the image." : "Pick an image to write."); return false; }
+    if (ask && action === "write" && !confirm(`PERMANENTLY ERASE ${dev} and write a copy of "${name}"?`)) return false;
+    const res = await (await fetch("/api/clone/start", { method: "POST", body: JSON.stringify({ device: dev, action, name }) })).json();
+    if (res.error) { alert(`${dev}: ${res.error}`); return false; }
+    delete clName[dev]; delete clPick[dev];
+    clPoll();
+    return true;
+  }
+
+  $("cl_write_all").addEventListener("click", async () => {
+    const name = $("cl_all_image").value;
+    const img = (clData.images || []).find(i => i.name === name);
+    if (!img) { alert("Pick an image first."); return; }
+    const targets = (clData.devices || []).filter(d => clFits(d, img) && (clData.jobs[d.device] || {}).state !== "running");
+    if (!targets.length) { alert("No idle card big enough for this image."); return; }
+    if (!confirm(`PERMANENTLY ERASE ${targets.length} card(s) (${targets.map(d => d.device).join(", ")}) and write "${name}" to each?`)) return;
+    for (const d of targets) await clStart(d.device, "write", name, false);
+  });
+
+  async function clPoll() {
+    if ($("view-clone").style.display === "none") return;
+    try {
+      clData = await (await fetch("/api/clone/status")).json();
+      misses = 0; $("offline").style.display = "none";
+    } catch {
+      if (++misses > 4) $("offline").style.display = "block";
+      return;
+    }
+    if (clData.error) return;
+    $("rootwarn").style.display = clData.root ? "none" : "block";
+    clRender();
+  }
+  setInterval(clPoll, 2000);
+
+  // ---- VM screen: the virtual Pi's desktop (VNC) and its console, live ----
+  let pvScreen = null;   // { dev, file, offset, timer, mode, rfb, port }
+  let RFB = null;        // noVNC, loaded on first use from the bundled copy
+
+  async function pvRefreshScreen() {
+    const sc = pvScreen;
+    if (!sc) return;
+    const job = (pvData && pvData.jobs || {})[sc.dev];
+    const vmUp = job && job.state === "running" && job.screen_port && ["boot", "install", "tailscale", "verify", "finish"].includes(job.step);
+    $("pv_screen_tab_desktop").disabled = !vmUp;
+    if (sc.mode === "desktop" && !vmUp) pvScreenMode("console");
+    if (sc.mode === "desktop" && vmUp && sc.port !== job.screen_port) pvConnectDesktop(job.screen_port);
+    let r;
+    try {
+      r = await (await fetch(`/api/provision/console?device=${encodeURIComponent(sc.dev)}` +
+                             `&file=${encodeURIComponent(sc.file)}&offset=${sc.offset}`)).json();
+    } catch { return; }
+    if (pvScreen !== sc) return;
+    const pre = $("pv_screen_pre");
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+    if (!r.file) {
+      pre.textContent = "The VM hasn't started yet. Its screen appears here once the card reaches the boot step.";
+    } else {
+      if (r.reset) pre.textContent = "";
+      pre.textContent += r.text;
+      if (pre.textContent.length > 400000) pre.textContent = pre.textContent.slice(-300000);
+      sc.file = r.file; sc.offset = r.offset;
+    }
+    $("pv_screen_title").textContent = `🖥 VM screen — ${sc.dev}${job ? " · " + job.hostname : ""}${r.file ? " · boot " + r.boot : ""}` +
+      (job && job.state !== "running" ? " (VM off)" : "");
+    $("pv_screen_hint").textContent = vmUp ? "" : job && job.screen_port === undefined && job.state === "running"
+      ? "Desktop: turn on “Show the VM's desktop” in Settings (applies to the next START)." : "";
+    if (atBottom || r.reset) pre.scrollTop = pre.scrollHeight;
+  }
+
+  async function pvConnectDesktop(port) {
+    const sc = pvScreen;
+    if (!sc) return;
+    if (sc.rfb) { try { sc.rfb.disconnect(); } catch { /* already closed */ } sc.rfb = null; }
+    sc.port = port;
+    const box = $("pv_screen_desktop");
+    box.innerHTML = "";
+    try {
+      if (!RFB) RFB = (await import("/vendor/novnc/core/rfb.js")).default;
+    } catch (e) {
+      box.innerHTML = `<p class="hint" style="padding:1rem;color:#ccc">Couldn't load the screen viewer: ${esc(String(e))}</p>`;
+      return;
+    }
+    if (pvScreen !== sc) return;
+    const rfb = new RFB(box, `ws://127.0.0.1:${port}`);
+    rfb.scaleViewport = true;
+    rfb.background = "#000";
+    rfb.addEventListener("disconnect", () => {
+      if (pvScreen === sc && sc.rfb === rfb) { sc.rfb = null; sc.port = null; }   // reconnects on the next refresh
+    });
+    sc.rfb = rfb;
+  }
+
+  function pvScreenMode(mode) {
+    const sc = pvScreen;
+    if (!sc) return;
+    sc.mode = mode;
+    $("pv_screen_desktop").style.display = mode === "desktop" ? "" : "none";
+    $("pv_screen_pre").style.display = mode === "desktop" ? "none" : "";
+    $("pv_screen_tab_desktop").classList.toggle("on", mode === "desktop");
+    $("pv_screen_tab_console").classList.toggle("on", mode !== "desktop");
+    if (mode !== "desktop" && sc.rfb) { try { sc.rfb.disconnect(); } catch { /* closed */ } sc.rfb = null; sc.port = null; }
+    pvRefreshScreen();
+  }
+  $("pv_screen_tab_desktop").addEventListener("click", () => pvScreenMode("desktop"));
+  $("pv_screen_tab_console").addEventListener("click", () => pvScreenMode("console"));
+
+  function pvOpenScreen(dev) {
+    pvCloseScreen();
+    const job = (pvData && pvData.jobs || {})[dev];
+    pvScreen = { dev, file: "", offset: 0, timer: null, mode: "console", rfb: null, port: null };
+    $("pv_screen_pre").textContent = "Connecting…";
+    $("pv_screen_title").textContent = `🖥 VM screen — ${dev}`;
+    $("pv_screen_modal").style.display = "flex";
+    pvScreenMode(job && job.screen_port && job.state === "running" ? "desktop" : "console");
+    pvScreen.timer = setInterval(pvRefreshScreen, 1000);
+  }
+
+  function pvCloseScreen() {
+    if (pvScreen) {
+      clearInterval(pvScreen.timer);
+      if (pvScreen.rfb) { try { pvScreen.rfb.disconnect(); } catch { /* closed */ } }
+    }
+    pvScreen = null;
+    $("pv_screen_desktop").innerHTML = "";
+    $("pv_screen_modal").style.display = "none";
+  }
+  $("pv_screen_close").addEventListener("click", pvCloseScreen);
+  $("pv_screen_modal").addEventListener("click", e => { if (e.target.id === "pv_screen_modal") pvCloseScreen(); });
+
+  // ---- log + registry modals ----
+  async function pvRefreshLog() {
+    const url = pvLogTarget === "kernel" ? "/api/provision/kernel-log"
+      : pvLogTarget.startsWith("clone:") ? `/api/clone/log?device=${encodeURIComponent(pvLogTarget.slice(6))}`
+      : `/api/provision/log?device=${encodeURIComponent(pvLogTarget)}`;
+    const { lines } = await (await fetch(url)).json();
+    const pre = $("pv_log_pre");
+    const atBottom = pre.parentElement.scrollTop + pre.parentElement.clientHeight >= pre.parentElement.scrollHeight - 20;
+    pre.textContent = (lines || []).join("\n") || "(nothing yet)";
+    if (atBottom) pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
+  }
+
+  function pvOpenLog(target) {
+    pvLogTarget = target;
+    const job = target !== "kernel" && !target.startsWith("clone:") && pvData && (pvData.jobs || {})[target];
+    $("pv_log_title").textContent = target === "kernel" ? "VM kernel build"
+      : target.startsWith("clone:") ? `Log — ${target.slice(6)}`
+      : `Log — ${target}${job ? " · " + job.hostname : ""}${job && job.log_dir ? "  (" + job.log_dir + ")" : ""}`;
+    $("pv_log_modal").style.display = "flex";
+    pvRefreshLog();
+    pvLogTimer = setInterval(pvRefreshLog, 2000);
+  }
+
+  function pvCloseLog() {
+    $("pv_log_modal").style.display = "none";
+    clearInterval(pvLogTimer); pvLogTimer = null;
+  }
+  $("pv_log_close").addEventListener("click", pvCloseLog);
+  $("pv_log_modal").addEventListener("click", e => { if (e.target.id === "pv_log_modal") pvCloseLog(); });
+
+  $("btn-registry").addEventListener("click", async () => {
+    $("pv_registry_modal").style.display = "flex";
+    const body = $("pv_registry_body");
+    body.innerHTML = `<p class="hint">Loading…</p>`;
+    const { rows } = await (await fetch("/api/provision/registry")).json();
+    body.innerHTML = rows.length ? `<table class="history"><thead><tr>
+      <th>Time</th><th>Hostname</th><th>Tailscale IP</th><th>Result</th><th>Detail</th></tr></thead><tbody>${
+      rows.map(r => `<tr><td>${esc(r.timestamp || "")}</td><td>${esc(r.hostname || "")}</td>
+        <td><b>${esc(r.tailscale_ip || "")}</b></td>
+        <td class="status-${esc(r.result || "")}">${esc((r.result || "").toUpperCase())}</td>
+        <td>${esc(r.detail || "")}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="hint">No cards provisioned yet.</p>`;
+  });
+  const pvCloseRegistry = () => { $("pv_registry_modal").style.display = "none"; };
+  $("pv_registry_close").addEventListener("click", pvCloseRegistry);
+  $("pv_registry_modal").addEventListener("click", e => { if (e.target.id === "pv_registry_modal") pvCloseRegistry(); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if ($("pv_log_modal").style.display !== "none") pvCloseLog();
+    if ($("pv_registry_modal").style.display !== "none") pvCloseRegistry();
+    if ($("pv_layout_modal").style.display !== "none") pvCloseLayout();
+    if ($("pv_screen_modal").style.display !== "none") pvCloseScreen();
+  });
+
   populateCountries();
   populateTimezones();
   populateKeymaps();
@@ -889,6 +1769,13 @@ all selected cards are written in parallel</footer>
   refreshProfiles();
   setInterval(poll, 2000);
   poll();
+  $("pv_timezone").innerHTML = $("timezone").innerHTML;
+  pvLoadSettings();
+  setInterval(pvPoll, 2000);
+  let savedView = "flash";
+  try { savedView = localStorage.getItem(VIEW_KEY) || "flash"; } catch { /* private mode */ }
+  if (["#provision", "#flash", "#clone"].includes(location.hash)) savedView = location.hash.slice(1);
+  showView(savedView);
 </script>
 </body>
 </html>

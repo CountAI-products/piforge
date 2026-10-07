@@ -31,7 +31,7 @@ jobs:
       - name: Shell scripts parse (bash -n)
         run: |
           set -e
-          for f in *.sh packaging/build-deb.sh packaging/install.sh packaging/build-rpm.sh; do
+          for f in *.sh vm-kernel/*.sh packaging/build-deb.sh packaging/install.sh packaging/build-rpm.sh; do
             [ -f "$f" ] || continue
             echo "-- $f"
             bash -n "$f"
@@ -58,11 +58,14 @@ jobs:
             sh -n "$f"
           done
 
+      - name: provision.example.json is valid JSON
+        run: python3 -c "import json; json.load(open('provision.example.json')); print('provision.example.json OK')"
+
       - name: Python files parse (ast.parse)
         run: |
           python3 -c "
           import ast, sys
-          files = ['server.py', 'firstrun_gen.py']
+          files = ['server.py', 'firstrun_gen.py', 'provision.py']
           for f in files:
               ast.parse(open(f).read(), filename=f)
               print(f, 'OK')
@@ -136,6 +139,7 @@ jobs:
           set -e
           if [ -f config.json ]; then echo "::error::config.json must never be committed"; exit 1; fi
           if [ -f profiles.json ]; then echo "::error::profiles.json must never be committed"; exit 1; fi
+          if [ -f provision.json ]; then echo "::error::provision.json must never be committed"; exit 1; fi
           echo "OK: no real config/profiles file in the tree"
 
   build-deb:

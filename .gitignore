@@ -1,6 +1,9 @@
 # Your real secrets — never commit these. Copy the .example.json files instead.
 config.json
 profiles.json
+provision.json
+provision.defaults.json
+*-provision.json
 
 # Downloaded/decompressed OS images (multi-GB, machine-local cache)
 rpi-images/

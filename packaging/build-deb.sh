@@ -40,7 +40,30 @@ cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/check-requirements.sh \
       "${REPO_DIR}"/README.md \
       "${REPO_DIR}"/LICENSE \
+      "${REPO_DIR}"/provision.py \
+      "${REPO_DIR}"/clone.py \
+      "${REPO_DIR}"/provision.example.json \
       "$BUILD_DIR/opt/piforge/"
+install -D -m 0755 "${REPO_DIR}/vm-kernel/build-vm-kernel.sh" "$BUILD_DIR/opt/piforge/vm-kernel/build-vm-kernel.sh"
+# Bundled noVNC (MPL-2.0) — the Full install tab's VM desktop viewer, so it works offline.
+mkdir -p "$BUILD_DIR/opt/piforge/vendor"
+cp -r "${REPO_DIR}/vendor/novnc" "$BUILD_DIR/opt/piforge/vendor/"
+
+# Optional extras for a ready-to-hand-out station build (neither is in git):
+#  - the prebuilt VM kernel, so stations never need to build one
+#    (VM_KERNEL=/path/to/Image, default: your ~/.cache/piforge/vm-kernel/Image)
+#  - provision.defaults.json, your site's Full install settings preset.
+#    It may contain the card password / Tailscale key: only hand that .deb
+#    to people who may have them.
+VM_KERNEL="${VM_KERNEL:-$HOME/.cache/piforge/vm-kernel/Image}"
+if [ -f "$VM_KERNEL" ]; then
+    install -m 0644 "$VM_KERNEL" "$BUILD_DIR/opt/piforge/vm-kernel/Image"
+    echo "Including VM kernel: $VM_KERNEL"
+fi
+if [ -f "${REPO_DIR}/provision.defaults.json" ]; then
+    install -m 0644 "${REPO_DIR}/provision.defaults.json" "$BUILD_DIR/opt/piforge/provision.defaults.json"
+    echo "Including provision.defaults.json (site preset — may contain secrets)"
+fi
 
 install -m 0755 "${SELF_DIR}/piforge" "$BUILD_DIR/usr/bin/piforge"
 install -m 0755 "${SELF_DIR}/piforge-server-root" "$BUILD_DIR/opt/piforge/piforge-server-root"
@@ -58,7 +81,9 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE_KB}
-Depends: python3, python3-gi, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0, util-linux, coreutils, xz-utils, openssl, wpasupplicant, parted, jq, curl, policykit-1
+Depends: python3, python3-gi, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0, util-linux, coreutils, e2fsprogs, xz-utils, openssl, wpasupplicant, parted, jq, curl, policykit-1
+Recommends: qemu-system-arm, e2fsprogs, openssh-client
+Suggests: gcc-aarch64-linux-gnu, make, flex, bison, bc, libssl-dev, libelf-dev
 Maintainer: PiForge contributors <noreply@example.invalid>
 Homepage: https://github.com/
 Description: Mass SD card installer for Raspberry Pi OS
