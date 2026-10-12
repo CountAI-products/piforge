@@ -130,3 +130,24 @@ The server records the operator, key issuance, exact-node join report, IP and
 completed preparation duration. The first-boot service retries failed join
 reports without exposing operator credentials. Server changes have not been
 deployed automatically; the existing live server must be upgraded separately.
+
+
+## Tailscale SSH and subnet routes (1.3.1)
+
+First-boot authentication now runs tailscale up with --ssh=true and
+--accept-routes=true, alongside the per-card auth key, hostname and production
+tag. The key is still minted on the ledger server; these are device settings
+applied when the Pi joins, not properties of the auth key itself.
+Tailscale SSH requires an SSH access rule permitting the intended operators to
+reach tag:production and the chosen Linux users. Accept-routes consumes approved
+subnet routes advertised by other tailnet devices; it does not advertise routes
+from this Pi. For a previously enrolled Pi, use:
+
+```bash
+sudo tailscale set --ssh=true --accept-routes=true
+```
+
+Existing burned cards are not modified by upgrading the station. Apply the above
+command on those Pis, or re-inject the updated first-boot provisioning on a card
+before its initial boot. Physical SSH and subnet connectivity remain to be tested
+with your actual tailnet access policy.

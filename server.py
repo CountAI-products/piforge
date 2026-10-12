@@ -1335,8 +1335,8 @@ tailscale up \
   --authkey="$AUTHKEY" \
   --hostname="$HOST" \
   --advertise-tags=__TAILSCALE_TAG__ \
-  --ssh=false \
-  --accept-routes=false \
+  --ssh=true \
+  --accept-routes=true \
   || fail "tailscale up failed (key expired >24h? already used?)"
 unset AUTHKEY
 
