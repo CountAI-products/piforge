@@ -11,6 +11,7 @@ static IP). Also serves named config profiles and a flash history log.
 Run:  sudo python3 server.py       then open http://127.0.0.1:47823
 """
 
+import operator_auth
 import base64
 import hashlib
 import json
@@ -91,7 +92,8 @@ URL_MARKER = os.path.join(IMAGES_DIR, "os-image.url")      # which URL is cached
 HISTORY_PATH = os.path.join(IMAGES_DIR, "flash-history.csv")
 HISTORY_FIELDS = ["timestamp", "device", "hostname", "status", "duration_s", "image_url"]
 TAILSCALE_LEDGER_PATH = os.path.join(IMAGES_DIR, "tailscale-ledger.csv")
-TAILSCALE_LEDGER_FIELDS = ["timestamp", "device", "hostname", "token_prefix", "key_id", "status"]
+TAILSCALE_LEDGER_FIELDS = ["timestamp", "device", "hostname", "token_prefix", "key_id", "status", "installer", "time_source", "total_seconds"]
+LEDGER_LOCK = threading.Lock()
 DD_BS = "8M"
 
 # Generic, secret-free fallback used only if config.json is absent — the UI
@@ -254,19 +256,47 @@ def read_history(limit=50):
 
 def log_tailscale_ledger(device, hostname, token_prefix, key_id, status):
     os.makedirs(IMAGES_DIR, exist_ok=True)
-    is_new = not os.path.exists(TAILSCALE_LEDGER_PATH)
-    with open(TAILSCALE_LEDGER_PATH, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=TAILSCALE_LEDGER_FIELDS)
-        if is_new:
-            w.writeheader()
-        w.writerow({
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "device": device,
-            "hostname": hostname,
-            "token_prefix": token_prefix,
-            "key_id": key_id,
-            "status": status,
-        })
+    with JOBS_LOCK:
+        job = dict(JOBS.get(device, {}))
+    row = {"timestamp": job.get("issued_at", ""), "device": device,
+           "hostname": hostname or job.get("hostname", ""), "token_prefix": token_prefix,
+           "key_id": key_id, "status": status, "installer": job.get("installer", ""),
+           "time_source": job.get("time_source", "unavailable"),
+           "total_seconds": job.get("total_seconds", "")}
+    with LEDGER_LOCK:
+        rows = []
+        if os.path.exists(TAILSCALE_LEDGER_PATH):
+            with open(TAILSCALE_LEDGER_PATH, newline="") as file:
+                rows = list(csv.DictReader(file))
+        rows.append(row)
+        temporary = TAILSCALE_LEDGER_PATH + ".part"
+        with open(temporary, "w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=TAILSCALE_LEDGER_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(temporary, TAILSCALE_LEDGER_PATH)
+
+
+def update_install_duration(device, seconds):
+    with JOBS_LOCK:job=dict(JOBS.get(device,{}))
+    if job.get("key_id") and job.get("operator_session"):
+        try:
+            operator_auth.request(load_tailscale_config(),"/installation-complete",{"key_id":job["key_id"],"total_seconds":round(seconds,1)},job["operator_session"])
+        except Exception:
+            set_job(device,ledger_report_error="Duration report failed; local duration retained")
+    with LEDGER_LOCK:
+        if not os.path.exists(TAILSCALE_LEDGER_PATH): return
+        with open(TAILSCALE_LEDGER_PATH, newline="") as file:
+            rows = list(csv.DictReader(file))
+        for row in reversed(rows):
+            if row.get("device") == device and row.get("status") == "issued":
+                row["total_seconds"] = round(seconds, 1)
+                break
+        temporary = TAILSCALE_LEDGER_PATH + ".part"
+        with open(temporary,"w",newline="") as file:
+            writer=csv.DictWriter(file,fieldnames=TAILSCALE_LEDGER_FIELDS,extrasaction="ignore")
+            writer.writeheader(); writer.writerows(rows)
+        os.replace(temporary,TAILSCALE_LEDGER_PATH)
 
 
 def read_tailscale_ledger(limit=50):
@@ -413,7 +443,7 @@ def list_devices():
             continue  # never offer a system disk
         path = "/dev/" + d["name"]
         with JOBS_LOCK:
-            job = dict(JOBS.get(path, {}))
+            job = {k:v for k,v in JOBS.get(path, {}).items() if k != "operator_session"}
         devs.append({
             "device": path,
             "size": d["size"],
@@ -718,6 +748,7 @@ def flash_device(dev, cfg, hostname, static_ip=None):
 
         set_job(dev, state="done", percent=100,
                 message=f"Done — {hostname} configured & verified, safe to remove")
+        set_job(dev,total_seconds=round(time.time()-start_time,1))
         log_history(dev, hostname, "done", time.time() - start_time, image_url)
     except Cancelled:
         unregister_proc(dev)
@@ -1135,7 +1166,7 @@ def start_partition(devices, profile):
 
     threads = []
     for dev in devices:
-        set_job(dev, state="queued", percent=0, message="Queued…", hostname=None, detail="")
+        set_job(dev, state="queued", percent=0, message="Queued…", installer=installer.strip(), operator_session=operator_session, detail="")
         t = threading.Thread(target=partition_device, args=(dev, profile), daemon=True)
         threads.append(t)
 
@@ -1171,7 +1202,7 @@ def start_flash(devices, cfg):
         hostname = (f"{cfg['hostname']}{i}" if cfg.get("number_hostnames", True)
                     else cfg["hostname"])
         static_ip = compute_static_ip(cfg["static_ip_base"], i) if cfg.get("static_ip_base") else None
-        set_job(dev, state="queued", percent=0, message="Queued…", hostname=hostname, detail="", master_image=False)
+        set_job(dev, state="queued", percent=0, message="Queued…", hostname=hostname, detail="", installer=cfg.get("installer",""), operator_session=cfg.get("operator_session",""), preparation_started=time.monotonic(), master_image=False)
         t = threading.Thread(target=flash_device, args=(dev, cfg, hostname, static_ip), daemon=True)
         threads.append(t)
 
@@ -1211,6 +1242,9 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/local/sbin/firstboot-tailscale.sh
 RemainAfterExit=no
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
@@ -1306,6 +1340,23 @@ tailscale up \
   || fail "tailscale up failed (key expired >24h? already used?)"
 unset AUTHKEY
 
+# Confirm the exact card token/key against its actual Tailscale node. No user
+# password, station secret or operator session is placed on the Pi.
+if [[ -f "$D/join-url" ]]; then
+python3 - <<'JOIN_REPORT'
+import json, subprocess, urllib.request
+from pathlib import Path
+folder=Path('/etc/pi-provision')
+status=json.loads(subprocess.check_output(['tailscale','status','--json']))
+node=status.get('Self',{}).get('ID')
+if not node:raise RuntimeError('Tailscale node identity unavailable')
+body={'token':(folder/'token').read_text().strip(),'key_id':(folder/'key-id').read_text().strip(),'node_id':node}
+request=urllib.request.Request((folder/'join-url').read_text().strip(),data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+with urllib.request.urlopen(request,timeout=30) as response:
+    if not json.load(response).get('ok'):raise RuntimeError('Join report rejected')
+JOIN_REPORT
+fi
+
 shred -u "$D/authkey.gpg" 2>/dev/null || rm -f "$D/authkey.gpg"
 shred -u "$D/token"       2>/dev/null || rm -f "$D/token"
 
@@ -1344,12 +1395,16 @@ def mint_tailscale_key(tconf, token, reader):
     if tconf.get("mint_endpoint"):
         req = urllib.request.Request(
             tconf["mint_endpoint"],
-            data=json.dumps({"token": token, "reader": reader}).encode(),
+            data=json.dumps({"token": token, "reader": reader, "hostname":tconf.get("hostname", "")}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         if tconf.get("ledger_auth_token"):
             req.add_header("Authorization", f"Bearer {tconf['ledger_auth_token']}")
+        session=tconf.get("operator_session")
+        if not session:raise ValueError("Authenticated operator session is required")
+        req.add_header("X-PiForge-Session",session)
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
+            response_date = resp.headers.get("Date")
         minted_via_server = True
     else:
         apikey_path = tconf.get("ts_apikey_file") or ""
@@ -1377,13 +1432,21 @@ def mint_tailscale_key(tconf, token, reader):
         req.add_header("Authorization", "Basic " + base64.b64encode(f"{apikey}:".encode()).decode())
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
+            response_date = resp.headers.get("Date")
         minted_via_server = False
 
     authkey = data.get("key")
     key_id = data.get("id", "")
     if not authkey:
         raise RuntimeError(f"no key in mint response: {data}")
-    return authkey, key_id, minted_via_server
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone
+    issued_at = ""
+    if "issued_at" in data:
+        issued_at = data["issued_at"]
+    elif response_date:
+        issued_at = parsedate_to_datetime(response_date).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return authkey, key_id, minted_via_server, issued_at, data.get("time_source", "mint_server_http_date" if minted_via_server else "tailscale_http_date")
 
 
 def gpg_encrypt_authkey(token, authkey, out_path):
@@ -1414,7 +1477,8 @@ def install_tailscale_provisioning(dev, root_mount, tconf):
     for the ledger."""
     token = os.urandom(32).hex()
     reader = reader_serial(dev)
-    authkey, key_id, minted_via_server = mint_tailscale_key(tconf, token, reader)
+    authkey, key_id, minted_via_server, issued_at, time_source = mint_tailscale_key(tconf, token, reader)
+    set_job(dev, issued_at=issued_at, time_source=time_source)
 
     prov_dir = os.path.join(root_mount, "etc", "pi-provision")
     os.makedirs(prov_dir, exist_ok=True)
@@ -1427,6 +1491,10 @@ def install_tailscale_provisioning(dev, root_mount, tconf):
     for name in ("authkey.gpg", "token", "key-id"):
         os.chmod(os.path.join(prov_dir, name), 0o600)
 
+    if tconf.get("mint_endpoint"):
+        with open(os.path.join(prov_dir,"join-url"),"w") as file:
+            file.write(operator_auth.base_url(tconf)+"/join")
+        os.chmod(os.path.join(prov_dir,"join-url"),0o600)
     marker_path = os.path.join(prov_dir, "build.marker")
     with open(marker_path, "w") as f:
         f.write("piforge-tailscale-build-v1\n")
@@ -1459,7 +1527,8 @@ def install_tailscale_provisioning(dev, root_mount, tconf):
         try:
             body = json.dumps({
                 "token": token, "key_id": key_id,
-                "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "utc": issued_at,
+                "installer": tconf.get("installer", ""),
                 "reader": reader, "status": "issued",
             }).encode()
             req = urllib.request.Request(
@@ -1497,13 +1566,23 @@ def tailscale_provision_device(dev):
         try:
             subprocess.run(["mount", root_part, rmnt], check=True, capture_output=True)
             tconf = load_tailscale_config()
+            with JOBS_LOCK:
+                job=JOBS.get(dev,{})
+                tconf["installer"] = job.get("installer", "")
+                tconf["operator_session"] = job.get("operator_session", "")
+                tconf["hostname"] = job.get("hostname", "")
             key_id, token_prefix, _reader = install_tailscale_provisioning(dev, rmnt, tconf)
             subprocess.run(["sync"])
         finally:
             subprocess.run(["umount", rmnt], capture_output=True)
             os.rmdir(rmnt)
 
+        with JOBS_LOCK:
+            preparation_started=JOBS.get(dev,{}).get("preparation_started")
+        duration=time.monotonic()-preparation_started if preparation_started else time.time()-start_time
+        set_job(dev,key_id=key_id,total_seconds=round(duration,1))
         log_tailscale_ledger(dev, "", token_prefix, key_id, "issued")
+        update_install_duration(dev,duration)
         set_job(dev, state="done", percent=100,
                 message=f"Done — Tailscale key minted (id={key_id}), will join on first boot")
         log_history(dev, "", "tailscale-provisioned", time.time() - start_time, f"tailscale key={key_id}")
@@ -1521,7 +1600,7 @@ def tailscale_provision_device(dev):
         log_history(dev, "", "error", time.time() - start_time, "")
 
 
-def start_tailscale_provision(devices):
+def start_tailscale_provision(devices, installer="", operator_session=""):
     all_present = sorted(d["device"] for d in list_devices())
     bad = [d for d in devices if d not in all_present]
     if bad:
@@ -1529,7 +1608,7 @@ def start_tailscale_provision(devices):
 
     threads = []
     for dev in devices:
-        set_job(dev, state="queued", percent=0, message="Queued…", hostname=None, detail="")
+        set_job(dev, state="queued", percent=0, message="Queued…", installer=installer.strip(), operator_session=operator_session, detail="")
         t = threading.Thread(target=tailscale_provision_device, args=(dev,), daemon=True)
         threads.append(t)
 
@@ -1561,6 +1640,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+        if path == "/api/operator":
+            try:
+                user=operator_auth.current(load_tailscale_config())
+                self._json({"user":user})
+            except Exception:
+                self._json({"user":None})
+            return
         if path == "/api/local-images":
             try:
                 import localimages
@@ -1655,6 +1741,23 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b"{}"
 
+        if parsed.path in ("/api/operator/login", "/api/operator/register", "/api/operator/logout"):
+            try:
+                origin=self.headers.get("Origin")
+                if origin and origin not in ("http://127.0.0.1:47823", "http://localhost:47823"):
+                    raise ValueError("Use the PiForge application for login")
+                if FLASH_ACTIVE.is_set():
+                    raise ValueError("Wait for the current card operation before changing users")
+                config=load_tailscale_config()
+                req=json.loads(body)
+                if parsed.path.endswith("logout"):
+                    operator_auth.logout(config);self._json({"ok":True})
+                else:
+                    user=operator_auth.login(config,req.get("username",""),req.get("password",""),parsed.path.endswith("register"))
+                    self._json({"user":user})
+            except Exception as error:
+                self._json({"error":str(error)},400)
+            return
         if parsed.path == "/api/local-image":
             try:
                 if FLASH_ACTIVE.is_set():
@@ -1769,7 +1872,10 @@ class Handler(BaseHTTPRequestHandler):
                 devices = req["devices"]
                 if not devices:
                     raise ValueError("no devices selected")
-                start_tailscale_provision(devices)
+                config=load_tailscale_config()
+                user=operator_auth.current(config)
+                if not user:raise ValueError("Sign in before provisioning Tailscale")
+                start_tailscale_provision(devices,user["username"],operator_auth.token(config))
                 self._json({"ok": True, "count": len(devices)})
             except Exception as e:
                 self._json({"error": str(e)}, 400)
@@ -1794,6 +1900,10 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(body)
             devices = req["devices"]
             cfg = req["config"]
+            user=operator_auth.current(load_tailscale_config())
+            if not user:raise ValueError("Sign in to the ledger server before installing cards")
+            cfg["installer"]=user["username"]
+            cfg["operator_session"]=operator_auth.token(load_tailscale_config())
             if str(cfg.get("image_url", "")).startswith("master:"):
                 import cloning
                 cloning.start(sys.modules[__name__], {
@@ -1801,6 +1911,8 @@ class Handler(BaseHTTPRequestHandler):
                     "devices": devices, "prefix": cfg.get("hostname", "supernova"),
                     "first": cfg.get("first_number", 1),
                     "tailscale": cfg.get("inject_tailscale", True),
+                    "installer": cfg["installer"],
+                    "operator_session":cfg["operator_session"],
                 })
                 self._json({"ok": True, "count": len(devices), "skip_partition": True})
                 return

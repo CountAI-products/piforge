@@ -49,6 +49,7 @@ package() {
   install -m 0644 "$src/blockmap.py" "$pkgdir/opt/piforge/blockmap.py"
   install -m 0644 "$src/share_image.py" "$pkgdir/opt/piforge/share_image.py"
   install -m 0644 "$src/localimages.py" "$pkgdir/opt/piforge/localimages.py"
+  install -m 0644 "$src/operator_auth.py" "$pkgdir/opt/piforge/operator_auth.py"
   install -m 0755 "$src/firstrun_gen.py" "$pkgdir/opt/piforge/firstrun_gen.py"
   install -m 0644 "$src/config.example.json" "$pkgdir/opt/piforge/config.example.json"
   install -m 0644 "$src/profiles.example.json" "$pkgdir/opt/piforge/profiles.example.json"

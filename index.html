@@ -310,6 +310,7 @@
     <button type="button" class="icon-btn" id="btn-bundle-download" title="Download settings + partition layout">⬇</button>
     <input type="file" id="bundle_file" accept="application/json,.json" style="display:none">
     <button type="button" class="icon-btn" id="btn-image-section" title="Make image from card" aria-label="Make image from card">💿</button>
+    <button type="button" class="secondary" id="btn-operator">Sign in / Register</button>
     <button type="button" class="icon-btn" id="btn-history" title="Flash history">🕘</button>
     <div class="counter">Cards done: <b id="count">0</b></div>
   </div>
@@ -348,6 +349,8 @@
   <div class="mode-body" id="flash-mode">
     <section class="panel">
       <h2>Card setup</h2>
+      <input id="installer" type="hidden">
+      <div class="hint" id="operator-attribution">Sign in to record the authenticated installer on each card.</div>
       <label>Hostname base</label>
       <input type="text" id="hostname" placeholder="raspberrypi">
       <div class="check">
@@ -594,6 +597,7 @@ all selected cards are written in parallel</footer>
   </div>
 </div>
 
+<dialog id="operator-dialog" style="max-width:440px;width:90%;padding:24px"><h2>PiForge operator account</h2><p>Accounts are authenticated and stored by the ledger server.</p><label>Username</label><input id="operator-username" autocomplete="username"><label>Password</label><input id="operator-password" type="password" autocomplete="current-password"><p class="hint">New accounts require a password of at least 12 characters. Configure the server mint endpoint and station authorization in Tailscale settings first.</p><p id="operator-error"></p><div class="btnrow"><button id="operator-login">Sign in</button><button id="operator-register">Register account</button><button id="operator-logout">Sign out</button><button id="operator-close">Close</button></div></dialog>
 <dialog id="local-image-dialog" style="max-width:700px;width:90%;max-height:80vh;overflow:auto"><h2>Select PiForge image</h2><p>Select a file on this Ubuntu station. It is used directly, without uploading or copying the full image.</p><input id="local-folder" placeholder="Folder path"><button id="btn-folder-go">Open folder</button><button id="btn-folder-up">Parent folder</button><div id="local-folder-files"></div><p id="local-folder-error"></p><button id="btn-folder-close">Close</button></dialog>
 <script>
   const $ = id => document.getElementById(id);
@@ -721,6 +725,34 @@ all selected cards are written in parallel</footer>
     ["Raspberry Pi OS Legacy Bookworm (64-bit, Full)", "https://downloads.raspberrypi.com/raspios_oldstable_full_arm64_latest"],
   ];
 
+  let operatorUser=null;
+  async function refreshOperator() {
+    try {
+      const result=await (await fetch("/api/operator")).json();
+      operatorUser=result.user || null;
+      $("btn-operator").textContent=operatorUser ? operatorUser.username + " · Account" : "Sign in / Register";
+      $("operator-attribution").textContent=operatorUser ? "Authenticated installer: " + operatorUser.username : "Sign in to record the authenticated installer on each card.";
+      $("installer").value=operatorUser ? operatorUser.username : "";
+    } catch {operatorUser=null;}
+  }
+  async function operatorAction(action) {
+    $("operator-error").textContent="Contacting server…";
+    try {
+      const result=await (await fetch("/api/operator/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("operator-username").value.trim(),password:$("operator-password").value})})).json();
+      if(result.error) throw new Error(result.error);
+      $("operator-password").value="";
+      await refreshOperator();
+      $("operator-error").textContent=action==="logout" ? "Signed out." : "Signed in successfully.";
+      if(action!=="logout") $("operator-dialog").close();
+    } catch(error) {$("operator-password").value="";$("operator-error").textContent=error.message;}
+  }
+  $("btn-operator").onclick=()=>$("operator-dialog").showModal();
+  $("operator-close").onclick=()=>{$("operator-password").value="";$("operator-dialog").close()};
+  $("operator-login").onclick=()=>operatorAction("login");
+  $("operator-register").onclick=()=>operatorAction("register");
+  $("operator-logout").onclick=()=>operatorAction("logout");
+  setInterval(refreshOperator,30000);
+  refreshOperator();
   let savedImages = [];
   let localImage = null;
   function populateImagePresets() {
@@ -857,6 +889,7 @@ all selected cards are written in parallel</footer>
       static_ip_gateway: $("static_ip_gateway").value.trim(),
       static_ip_dns: $("static_ip_dns").value.trim(),
       static_ip_iface: $("static_ip_iface").value,
+      installer: operatorUser ? operatorUser.username : "",
       image_url: currentImageUrl(),
       first_number: Number($("first_number").value),
       inject_tailscale: $("inject_tailscale").checked,
@@ -884,6 +917,7 @@ all selected cards are written in parallel</footer>
   }
 
   function applyToForm(cfg) {
+
     $("hostname").value = cfg.hostname ?? "";
     $("number_hostnames").checked = cfg.number_hostnames !== false;
     $("user").value = cfg.user ?? "";
@@ -1009,7 +1043,7 @@ all selected cards are written in parallel</footer>
           <td>${esc(r.timestamp || "")}</td>
           <td>${esc(r.device || "")}</td>
           <td>${esc(r.hostname || "")}</td>
-          <td class="status-${esc(r.status || "")}">${esc((r.status || "").toUpperCase())}</td>
+          <td class="status-${esc(r.status || "")}">${esc((r.status || "").toUpperCase())}${r.total_seconds ? " · " + esc(r.total_seconds) + " s" : ""}</td>
           <td>${esc(r.duration_s || "")}s</td>
           <td>${esc(r.image_url || "")}</td>
         </tr>`).join("")}</tbody></table>`;
@@ -1049,6 +1083,7 @@ all selected cards are written in parallel</footer>
             ${job.hostname ? `<span>· ${esc(job.hostname)}</span>` : ""}</div>
           <div class="devmeta">${esc(d.model)} · ${esc(d.size_h)}${d.usb_link ? " · " + esc(d.usb_link) : d.tran ? " · " + esc(d.tran) : ""}</div>
           ${d.has_data ? `<div class="databadge">⚠ has data: ${esc((d.fstypes || []).join(", "))}</div>` : ""}
+          ${job.total_seconds !== undefined ? `<div class="devmsg">Total card preparation: ${esc(job.total_seconds)} seconds</div>` : ""}
           ${job.message ? `<div class="devmsg">${esc(job.message)}</div>` : ""}
           <div class="bar ${st === "verifying" ? "verify" : ""} ${job.indeterminate ? "indeterminate" : ""}"
                style="display:${busy ? "block" : "none"}"><i style="transform:scaleX(${pct / 100})"></i></div>
@@ -1452,7 +1487,7 @@ all selected cards are written in parallel</footer>
     if (!confirm(`On:\n\n${devs.join("\n")}\n\nmint a Tailscale key and install the first-boot join service. Continue?`)) return;
     const r = await fetch("/api/tailscale-provision", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ devices: devs }),
+      body: JSON.stringify({ devices: devs, installer: $("installer").value.trim() }),
     });
     const res = await r.json();
     if (res.error) alert("Error: " + res.error);
@@ -1633,14 +1668,14 @@ all selected cards are written in parallel</footer>
         return;
       }
       body.innerHTML = `<table class="history"><thead><tr>
-        <th>Time</th><th>Device</th><th>Hostname</th><th>Token</th><th>Key ID</th><th>Status</th>
+        <th>Issued UTC (server)</th><th>Device</th><th>Hostname</th><th>Installer</th><th>Key ID</th><th>Status / Total time</th>
         </tr></thead><tbody>${rows.map(r => `<tr>
           <td>${esc(r.timestamp || "")}</td>
           <td>${esc(r.device || "")}</td>
           <td>${esc(r.hostname || "")}</td>
-          <td>${esc(r.token_prefix || "")}…</td>
+          <td>${esc(r.installer || "Not recorded")}</td>
           <td>${esc(r.key_id || "")}</td>
-          <td class="status-${esc(r.status || "")}">${esc((r.status || "").toUpperCase())}</td>
+          <td class="status-${esc(r.status || "")}">${esc((r.status || "").toUpperCase())}${r.total_seconds ? " · " + esc(r.total_seconds) + " s" : ""}</td>
         </tr>`).join("")}</tbody></table>`;
     });
   }

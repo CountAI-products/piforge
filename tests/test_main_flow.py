@@ -23,7 +23,7 @@ class MainFlowTests(unittest.TestCase):
     def test_usual_flash_routes_master_to_clone_with_tailscale(self):
         payload = {'devices':['/dev/sdb'], 'config':{'image_url':'master:production', 'hostname':'mill', 'first_number':11,'inject_tailscale':True}}
         request = urllib.request.Request(self.url+'/api/flash', data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
-        with patch('cloning.start') as start, patch('server.os.geteuid',return_value=0):
+        with patch('cloning.start') as start, patch('server.os.geteuid',return_value=0), patch('operator_auth.current',return_value={'id':1,'username':'operator'}), patch('operator_auth.token',return_value='test-session'):
             with urllib.request.urlopen(request) as response:
                 self.assertTrue(json.load(response)['skip_partition'])
             actual = start.call_args.args[1]

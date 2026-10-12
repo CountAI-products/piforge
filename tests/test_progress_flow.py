@@ -34,7 +34,7 @@ class ProgressFlowTests(unittest.TestCase):
             def capture(device,**fields):
                 events.append(fields.copy());original(device,**fields)
                 if fields.get('state')=='done':finished.set()
-            with patch.object(server,'list_devices',return_value=[{'device':'/dev/test-card'}]),patch.object(clone,'image_paths',return_value=(str(source),str(source))),patch.object(cloning.subprocess,'Popen',return_value=Child()),patch.object(server,'set_job',side_effect=capture):
+            with patch.object(server,'list_devices',return_value=[{'device':'/dev/test-card'}]),patch.object(clone,'image_paths',return_value=(str(source),str(source))),patch.object(cloning.subprocess,'Popen',return_value=Child()),patch.object(server,'set_job',side_effect=capture),patch.object(server,'update_install_duration'):
                 cloning.start(server,{'operation':'write','name':'test','devices':['/dev/test-card'],'tailscale':False})
                 self.assertTrue(finished.wait(3),'Worker did not complete')
                 # Ensure runner cleanup finishes before mocks leave scope.

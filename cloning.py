@@ -48,7 +48,7 @@ def start(server, request):
         JOBS.clear()
         for device, hostname in zip(devices, hostnames):
             server.clear_cancel(device)
-            server.set_job(device, state='queued', percent=0, hostname=hostname, message='Queued…', detail='', master_image=operation == 'write')
+            server.set_job(device, state='queued', percent=0, hostname=hostname, message='Queued…', detail='', installer=request.get('installer','').strip(), operator_session=request.get('operator_session',''), preparation_started=time.monotonic(), master_image=operation == 'write')
             JOBS[device] = {'state': 'queued', 'hostname': hostname, 'log': [], 'seconds': 0}
 
     def worker(device, hostname):
@@ -99,7 +99,9 @@ def start(server, request):
                     state = server.JOBS[device]['state']
                 if state != 'done':
                     raise RuntimeError('Image written, but Tailscale injection failed or was cancelled')
-            server.set_job(device, state='done', percent=100,
+            duration = round(time.monotonic()-started,1)
+            server.update_install_duration(device,duration)
+            server.set_job(device, total_seconds=duration, state='done', percent=100,
                            message='Master image saved — select it in OS image' if operation == 'read' else 'Installed image ready; partitions preserved' + ('; Tailscale injected' if request.get('tailscale', False) else '; continue to Tailscale'))
             with LOCK:
                 JOBS[device]['state'] = 'done' if code == 0 else 'failed'

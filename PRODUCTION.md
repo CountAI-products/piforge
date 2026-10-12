@@ -113,3 +113,20 @@ tar -xzf master.tar.gz
 In PiForge select Custom built from PiForge and browse to the extracted .img.
 Keep .json beside it. The included map is reused on that PC without another
 source scan. Writable metadata-folder access is needed for the map lock.
+
+
+## Authenticated operators (1.3.0)
+
+Deploy the matching tailscale_auth server changes before installing this client.
+Configure the server /mint endpoint and its station authorization token in the
+Tailscale settings. Use Sign in / Register in PiForge's top bar. The username is
+server-confirmed, not a typed installer label. Registration creates a server-side
+account and signs in; login is required before card burning or key injection.
+A station restart or eight-hour session expiry requires login again. Credentials
+are not persisted locally and accounts/sessions do not enter the card image.
+Operator changes are blocked while a card operation is active.
+
+The server records the operator, key issuance, exact-node join report, IP and
+completed preparation duration. The first-boot service retries failed join
+reports without exposing operator credentials. Server changes have not been
+deployed automatically; the existing live server must be upgraded separately.
