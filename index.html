@@ -1152,6 +1152,11 @@ all selected cards are written in parallel</footer>
     for (const device of devices) {
       const job = device.job || {};
       if (!job.master_image || !["writing", "verifying"].includes(job.state)) continue;
+      // New server telemetry already measures the whole-image copy. Preserve it.
+      if (job.message && job.message.includes("Writing mapped blocks")) {
+        job.indeterminate = false;
+        continue;
+      }
       const snapshot = cloneJobs[device.device];
       const copy = copyDisplay(snapshot ? snapshot.log : []);
       if (snapshot && snapshot.state === "running" && job.state === "writing" && copy.partition) {
@@ -1159,6 +1164,7 @@ all selected cards are written in parallel</footer>
         job.indeterminate = copy.percent === null;
         job.message = copy.percent === null ? `Scanning ${copy.partition} before copying…` : `Copying ${copy.partition === "image" ? "whole image" : copy.partition}: ${copy.percent}%`;
       }
+      if (!copy.partition && Number(job.percent || 0) === 0) job.indeterminate = true;
       const now = Date.now(), percent = Number(job.percent || 0);
       const phase = copy.partition || job.state;
       let timing = progressTiming.get(device.device);
