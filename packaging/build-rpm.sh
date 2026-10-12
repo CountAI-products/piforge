@@ -34,6 +34,11 @@ mkdir -p "$RPMBUILD_ROOT"/{BUILD,RPMS,SOURCES,SPECS,SRPMS} "$SRC_STAGE" "$DIST_D
 cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/index.html \
       "${REPO_DIR}"/firstrun_gen.py \
+      "${REPO_DIR}"/clone.py \
+      "${REPO_DIR}"/cloning.py \
+      "${REPO_DIR}"/localimages.py \
+      "${REPO_DIR}"/PRODUCTION.md \
+      "${REPO_DIR}"/dashboard-finalize.sh \
       "${REPO_DIR}"/config.example.json \
       "${REPO_DIR}"/profiles.example.json \
       "${REPO_DIR}"/flash-all.sh \

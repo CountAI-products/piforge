@@ -33,6 +33,11 @@ mkdir -p "$BUILD_DIR/DEBIAN" \
 cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/index.html \
       "${REPO_DIR}"/firstrun_gen.py \
+      "${REPO_DIR}"/clone.py \
+      "${REPO_DIR}"/cloning.py \
+      "${REPO_DIR}"/localimages.py \
+      "${REPO_DIR}"/PRODUCTION.md \
+      "${REPO_DIR}"/dashboard-finalize.sh \
       "${REPO_DIR}"/config.example.json \
       "${REPO_DIR}"/profiles.example.json \
       "${REPO_DIR}"/tailscale_config.example.json \
@@ -59,9 +64,9 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE_KB}
-Depends: python3, python3-gi, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0, util-linux, coreutils, xz-utils, openssl, wpasupplicant, parted, dosfstools, e2fsprogs, gnupg, jq, curl, policykit-1
+Depends: python3, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, util-linux, coreutils, xz-utils, openssl, wpasupplicant, parted, dosfstools, e2fsprogs (>= 1.47), udev, gnupg, jq, curl, pkexec, polkitd
 Maintainer: PiForge contributors <noreply@example.invalid>
-Homepage: https://github.com/
+Homepage: https://github.com/CountAI-products/piforge
 Description: Mass SD card installer for Raspberry Pi OS
  PiForge flashes Raspberry Pi OS to many SD cards in parallel with
  hostname, user, password, Wi-Fi, SSH keys, static IP, and other

@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import os
+import sys
 import re
 import signal
 import subprocess
@@ -356,6 +357,25 @@ def request_cancel(devices):
 
 # ---------------------------------------------------------------- devices
 
+def usb_link_info(device, sys_root="/sys"):
+    """Read negotiated speed from the reader's nearest USB ancestor."""
+    from pathlib import Path
+    path = Path(sys_root, "class/block", os.path.basename(device), "device")
+    if not path.exists():
+        return {"usb_speed_mbps": None, "usb_link": "USB speed unavailable"}
+    resolved = path.resolve()
+    for ancestor in (resolved, *resolved.parents):
+        if not (ancestor / "idVendor").is_file():
+            continue
+        try:
+            speed = float((ancestor / "speed").read_text().strip())
+        except (OSError, ValueError):
+            return {"usb_speed_mbps": None, "usb_link": "USB speed unavailable"}
+        generation = "USB 3.x" if speed >= 5000 else "USB 2.0" if speed >= 480 else "USB 1.x"
+        return {"usb_speed_mbps": speed, "usb_link": f"{generation} · {speed:g} Mbps"}
+    return {"usb_speed_mbps": None, "usb_link": "USB speed unavailable"}
+
+
 def list_devices():
     """Removable block devices safe to flash."""
     out = subprocess.run(
@@ -400,6 +420,7 @@ def list_devices():
             "size_h": human_size(d["size"]),
             "model": (d.get("model") or "").strip() or "Unknown",
             "tran": d.get("tran") or "",
+            **(usb_link_info(path) if d.get("tran") == "usb" else {}),
             "has_data": bool(fstypes),
             "fstypes": sorted(set(fstypes)),
             "job": job,
@@ -1076,6 +1097,9 @@ def partition_device(dev, profile):
 
 
 def start_partition(devices, profile):
+    with JOBS_LOCK:
+        if any(JOBS.get(device, {}).get("master_image") for device in devices):
+            raise ValueError("Finished-card images already contain partitions; continue to Tailscale")
     all_present = sorted(d["device"] for d in list_devices())
     bad = [d for d in devices if d not in all_present]
     if bad:
@@ -1147,7 +1171,7 @@ def start_flash(devices, cfg):
         hostname = (f"{cfg['hostname']}{i}" if cfg.get("number_hostnames", True)
                     else cfg["hostname"])
         static_ip = compute_static_ip(cfg["static_ip_base"], i) if cfg.get("static_ip_base") else None
-        set_job(dev, state="queued", percent=0, message="Queued…", hostname=hostname, detail="")
+        set_job(dev, state="queued", percent=0, message="Queued…", hostname=hostname, detail="", master_image=False)
         t = threading.Thread(target=flash_device, args=(dev, cfg, hostname, static_ip), daemon=True)
         threads.append(t)
 
@@ -1537,6 +1561,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+        if path == "/api/local-images":
+            try:
+                import localimages
+                self._json(localimages.browse(query.get("folder", [None])[0]))
+            except Exception as error:
+                self._json({"error": str(error)}, 400)
+            return
+        if path == "/api/clones":
+            import clone, cloning
+            self._json({"images": clone.list_images(), "jobs": cloning.snapshot(), "active": FLASH_ACTIVE.is_set()})
+            return
+        if path == "/clone.html":
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
         if path in ("/", "/index.html"):
             try:
                 with open(os.path.join(BASE_DIR, "index.html"), "rb") as f:
@@ -1614,6 +1654,24 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b"{}"
+
+        if parsed.path == "/api/local-image":
+            try:
+                if FLASH_ACTIVE.is_set():
+                    raise ValueError("Wait for the current card operation to finish")
+                import localimages
+                self._json(localimages.register(json.loads(body)["path"]))
+            except Exception as error:
+                self._json({"error": str(error)}, 400)
+            return
+        if parsed.path == "/api/clone":
+            try:
+                import cloning
+                cloning.start(sys.modules[__name__], json.loads(body))
+                self._json({"ok": True})
+            except Exception as error:
+                self._json({"error": str(error)}, 400)
+            return
 
         if parsed.path == "/api/profiles":
             try:
@@ -1736,6 +1794,16 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(body)
             devices = req["devices"]
             cfg = req["config"]
+            if str(cfg.get("image_url", "")).startswith("master:"):
+                import cloning
+                cloning.start(sys.modules[__name__], {
+                    "operation": "write", "name": cfg["image_url"][7:],
+                    "devices": devices, "prefix": cfg.get("hostname", "supernova"),
+                    "first": cfg.get("first_number", 1),
+                    "tailscale": cfg.get("inject_tailscale", True),
+                })
+                self._json({"ok": True, "count": len(devices), "skip_partition": True})
+                return
             for key in ("hostname", "user", "password", "timezone"):
                 if not cfg.get(key):
                     raise ValueError(f"missing config field: {key}")

@@ -221,3 +221,31 @@ def _main():
 
 if __name__ == "__main__":
     _main()
+
+
+def make_identity_firstrun(hostname):
+    """Clone identity runs before normal network services, preserving software."""
+    if not re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", hostname or ""):
+        raise ValueError("Hostname must be 1-63 letters, digits or hyphens")
+    return r"""#!/bin/bash
+set -euo pipefail
+printf '%s\n' '__HOST__' > /etc/hostname
+hostname '__HOST__'
+if grep -q '^127.0.1.1' /etc/hosts; then
+    sed -i 's/^127.0.1.1.*/127.0.1.1\t__HOST__/' /etc/hosts
+else
+    printf '127.0.1.1\t__HOST__\n' >> /etc/hosts
+fi
+systemd-machine-id-setup
+mkdir -p /var/lib/dbus
+ln -sf /etc/machine-id /var/lib/dbus/machine-id
+ssh-keygen -A
+for boot in /boot/firmware /boot; do
+    if [ -f "$boot/cmdline.txt" ]; then
+        mount -o remount,rw "$boot"
+        sed -i 's/ systemd.run[^ ]*//g; s/ systemd.unit=kernel-command-line.target//g' "$boot/cmdline.txt"
+        rm -f "$boot/firstrun.sh"
+    fi
+done
+sync
+""".replace('__HOST__', hostname)

@@ -283,9 +283,13 @@
     white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow-y: auto;
   }
   .modal .subhead { margin-top: 1rem; }
+
+.bar.indeterminate i {transform:none !important;width:30%;animation:copy-scanning 1.5s linear infinite;}
+@keyframes copy-scanning {from {margin-left:-30%;} to {margin-left:100%;}}
 </style>
 </head>
 <body>
+
 <div class="offline-banner" id="offline">Station program not responding. Tell your supervisor.</div>
 <div class="root-banner" id="rootwarn">Flashing disabled — restart the station program with: sudo python3 server.py</div>
 <header>
@@ -305,6 +309,7 @@
     <button type="button" class="icon-btn" id="btn-bundle-upload" title="Upload settings + partition layout">⬆</button>
     <button type="button" class="icon-btn" id="btn-bundle-download" title="Download settings + partition layout">⬇</button>
     <input type="file" id="bundle_file" accept="application/json,.json" style="display:none">
+    <button type="button" class="icon-btn" id="btn-image-section" title="Make image from card" aria-label="Make image from card">💿</button>
     <button type="button" class="icon-btn" id="btn-history" title="Flash history">🕘</button>
     <div class="counter">Cards done: <b id="count">0</b></div>
   </div>
@@ -333,6 +338,13 @@
       <div class="hint" style="margin-top:0.5rem">One profile holds both the flash settings and the partition layout — pick it once, works on either tab.</div>
     </section>
 
+  <div class="mode-body" id="image-mode" style="display:none">
+    <section class="panel"><h2>Make image from card</h2>
+      <input id="master_name" placeholder="Image name, e.g. super3nova-v12">
+      <button type="button" class="secondary" id="btn-make-image">Make image from selected card</button>
+      <div class="hint">Select one fully installed, cleanly shut-down master card. Its complete partition layout and software are saved.</div>
+<p class="hint">Saved images live in the station's rpi-images/clones folder. Keep the .img and matching .json together when moving them.</p><button class="secondary" id="btn-image-back">Return to Flash OS</button></section>
+  </div>
   <div class="mode-body" id="flash-mode">
     <section class="panel">
       <h2>Card setup</h2>
@@ -415,8 +427,17 @@
 
       <div class="subhead">OS image</div>
       <select id="image_preset"></select>
+      <div id="local-image-controls" style="display:none">
+        <button type="button" class="secondary" id="btn-local-image">Choose image from local folder…</button>
+        <div class="hint" id="local-image-selected">Select a PiForge .img file with its matching .json beside it.</div>
+      </div>
       <input type="text" id="image_url_custom" placeholder="https://.../image.img.xz" style="display:none; margin-top:0.4rem">
 
+      <div id="master-options" style="display:none">
+        <div class="hint">Installed image: partition stage is skipped. Software, user and network settings come from the master; the hostname and device identity are made unique.</div>
+        <label>First device number</label><input id="first_number" type="number" min="1" value="1">
+        <div class="check"><input id="inject_tailscale" type="checkbox" checked><span>Inject a unique Tailscale key after writing</span></div>
+      </div>
       <div class="subhead">Options</div>
       <div class="check">
         <input type="checkbox" id="verify">
@@ -573,6 +594,7 @@ all selected cards are written in parallel</footer>
   </div>
 </div>
 
+<dialog id="local-image-dialog" style="max-width:700px;width:90%;max-height:80vh;overflow:auto"><h2>Select PiForge image</h2><p>Select a file on this Ubuntu station. It is used directly, without uploading or copying the full image.</p><input id="local-folder" placeholder="Folder path"><button id="btn-folder-go">Open folder</button><button id="btn-folder-up">Parent folder</button><div id="local-folder-files"></div><p id="local-folder-error"></p><button id="btn-folder-close">Close</button></dialog>
 <script>
   const $ = id => document.getElementById(id);
   let devices = [], flashing = false, wasFlashing = false, misses = 0;
@@ -699,24 +721,57 @@ all selected cards are written in parallel</footer>
     ["Raspberry Pi OS Legacy Bookworm (64-bit, Full)", "https://downloads.raspberrypi.com/raspios_oldstable_full_arm64_latest"],
   ];
 
+  let savedImages = [];
+  let localImage = null;
   function populateImagePresets() {
     const sel = $("image_preset");
     sel.innerHTML = IMAGE_PRESETS.map(([label, url]) =>
       `<option value="${esc(url)}">${esc(label)}</option>`).join("")
-      + `<option value="__custom__">Custom URL…</option>`;
-    sel.addEventListener("change", () => {
-      $("image_url_custom").style.display = sel.value === "__custom__" ? "block" : "none";
-    });
+      + `<option value="__piforge__">Custom built from PiForge · local file</option><option value="__custom__">Custom URL…</option>`;
+    sel.addEventListener("change", updateImageFlow);
+  }
+
+  function updateImageFlow() {
+    const value = $("image_preset").value;
+    const master = value.startsWith("master:") || value === "__piforge__";
+    $("local-image-controls").style.display = value === "__piforge__" ? "" : "none";
+    $("image_url_custom").style.display = value === "__custom__" ? "block" : "none";
+    $("master-options").style.display = master ? "" : "none";
+    $("tab-partition").disabled = master;
+    $("tab-partition").textContent = master ? "2 · Partitions included ✓" : "2 · Partition cards";
+    $("verify").disabled = master;
+    $("verify").parentElement.querySelector("span").textContent = master ? "Filesystem checks included for installed images" : "Verify after write (slower, ~2×)";
+    if (master && mode === "partition") setMode("flash");
+  }
+
+  async function refreshSavedImages() {
+    const data = await (await fetch("/api/clones")).json();
+    const names = data.images.map(image => image.name);
+    if (JSON.stringify(names) === JSON.stringify(savedImages)) return;
+    savedImages = names;
+    const select = $("image_preset");
+    const previous = select.value;
+    select.querySelectorAll('option[data-master]').forEach(option => option.remove());
+    for (const image of data.images) {
+      const option = document.createElement("option");
+      option.dataset.master = "true";
+      option.value = "master:" + image.name;
+      option.textContent = "Installed card image · " + image.name;
+      select.insertBefore(option, select.querySelector('option[value="__custom__"]'));
+    }
+    if ([...select.options].some(option => option.value === previous)) select.value = previous;
+    updateImageFlow();
   }
 
   function currentImageUrl() {
     const sel = $("image_preset");
+    if (sel.value === "__piforge__") return localImage ? "master:" + localImage.name : "master:";
     return sel.value === "__custom__" ? $("image_url_custom").value.trim() : sel.value;
   }
 
   function setImageUrl(url) {
     const sel = $("image_preset");
-    const known = IMAGE_PRESETS.some(([, u]) => u === url);
+    const known = [...sel.options].some(option => option.value === url);
     if (known) {
       sel.value = url;
       $("image_url_custom").style.display = "none";
@@ -725,7 +780,40 @@ all selected cards are written in parallel</footer>
       $("image_url_custom").value = url;
       $("image_url_custom").style.display = "block";
     }
+    updateImageFlow();
   }
+
+  let folderParent = "";
+  async function browseFolder(folder) {
+    try {
+      const response = await fetch("/api/local-images" + (folder ? "?folder=" + encodeURIComponent(folder) : ""));
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      $("local-folder").value = data.folder; folderParent = data.parent;
+      $("local-folder-error").textContent = "";
+      $("local-folder-files").replaceChildren();
+      for (const entry of data.entries) {
+        const button = document.createElement("button");
+        button.type = "button"; button.style.display = "block";
+        button.textContent = (entry.directory ? "📁 " : "💿 ") + entry.name + (!entry.directory && !entry.metadata ? " — missing .json" : "");
+        button.disabled = !entry.directory && !entry.metadata;
+        button.addEventListener("click", async () => {
+          if (entry.directory) return browseFolder(entry.path);
+          const result = await (await fetch("/api/local-image", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:entry.path})})).json();
+          if (result.error) { $("local-folder-error").textContent = result.error; return; }
+          localImage = result;
+          $("local-image-selected").textContent = result.path;
+          $("local-image-dialog").close();
+          updateImageFlow();
+        });
+        $("local-folder-files").append(button);
+      }
+    } catch (error) { $("local-folder-error").textContent = error.message; }
+  }
+  $("btn-local-image").addEventListener("click", () => { $("local-image-dialog").showModal(); browseFolder(); });
+  $("btn-folder-go").addEventListener("click", () => browseFolder($("local-folder").value));
+  $("btn-folder-up").addEventListener("click", () => browseFolder(folderParent));
+  $("btn-folder-close").addEventListener("click", () => $("local-image-dialog").close());
 
   // ---- Password show/hide ----
   document.querySelectorAll(".eye").forEach(btn => {
@@ -770,6 +858,8 @@ all selected cards are written in parallel</footer>
       static_ip_dns: $("static_ip_dns").value.trim(),
       static_ip_iface: $("static_ip_iface").value,
       image_url: currentImageUrl(),
+      first_number: Number($("first_number").value),
+      inject_tailscale: $("inject_tailscale").checked,
       verify: $("verify").checked,
       notify_on_finish: $("notify_on_finish").checked,
     };
@@ -842,7 +932,7 @@ all selected cards are written in parallel</footer>
 
   $("btn-reset").addEventListener("click", () => {
     localStorage.removeItem(STORAGE_KEY);
-    loadDefaults();
+    refreshSavedImages().then(loadDefaults);
   });
 
   // ---- Profiles (one profile = flash config + partition layout, together) ----
@@ -957,10 +1047,10 @@ all selected cards are written in parallel</footer>
         <div class="devinfo">
           <div class="devname">${esc(d.device)}
             ${job.hostname ? `<span>· ${esc(job.hostname)}</span>` : ""}</div>
-          <div class="devmeta">${esc(d.model)} · ${esc(d.size_h)}${d.tran ? " · " + esc(d.tran) : ""}</div>
+          <div class="devmeta">${esc(d.model)} · ${esc(d.size_h)}${d.usb_link ? " · " + esc(d.usb_link) : d.tran ? " · " + esc(d.tran) : ""}</div>
           ${d.has_data ? `<div class="databadge">⚠ has data: ${esc((d.fstypes || []).join(", "))}</div>` : ""}
           ${job.message ? `<div class="devmsg">${esc(job.message)}</div>` : ""}
-          <div class="bar ${st === "verifying" ? "verify" : ""}"
+          <div class="bar ${st === "verifying" ? "verify" : ""} ${job.indeterminate ? "indeterminate" : ""}"
                style="display:${busy ? "block" : "none"}"><i style="transform:scaleX(${pct / 100})"></i></div>
         </div>
         <div class="devside">
@@ -1007,6 +1097,7 @@ all selected cards are written in parallel</footer>
     const cancelBtn = $("btn-cancel-batch");
     cancelBtn.style.display = flashing ? "block" : "none";
     const n = selected.size;
+    $("btn-make-image").disabled = flashing || n !== 1;
     if (flashing) { btn.disabled = true; btn.textContent = "FLASHING…"; }
     else { btn.disabled = n === 0; btn.textContent = n === 0 ? "SELECT CARDS" : `START — FLASH ${n} CARD${n > 1 ? "S" : ""}`; }
 
@@ -1019,7 +1110,7 @@ all selected cards are written in parallel</footer>
     // server-side, since it depends on that card's actual size.
     if (flashing) { pbtn.disabled = true; pbtn.textContent = "WORKING…"; }
     else {
-      pbtn.disabled = n === 0 || pctSum() > 100.5;
+      pbtn.disabled = currentImageUrl().startsWith("master:") || n === 0 || pctSum() > 100.5;
       pbtn.textContent = n === 0 ? "SELECT CARDS" : `ERASE & PARTITION ${n} CARD${n > 1 ? "S" : ""}`;
     }
 
@@ -1031,6 +1122,18 @@ all selected cards are written in parallel</footer>
     }
   }
 
+  const progressTiming = new Map();
+  function copyDisplay(log) {
+    let partition = null, percent = null;
+    for (const line of log || []) {
+      if (line.startsWith("COPY ")) { partition = line.split(/\s+/)[1]; percent = null; }
+      if (line.startsWith("PROGRESS ")) {
+        const fields = line.split(/\s+/);
+        if (!partition || fields[1] === partition) { partition = fields[1]; percent = Number(fields[2]); }
+      }
+    }
+    return {partition, percent};
+  }
   async function poll() {
     let data;
     try {
@@ -1040,8 +1143,33 @@ all selected cards are written in parallel</footer>
       if (++misses > 4) $("offline").style.display = "block";
       return;
     }
+    await refreshSavedImages();
+    let cloneJobs = {};
+    try { cloneJobs = (await (await fetch("/api/clones")).json()).jobs || {}; } catch {}
     flashing = data.flashing;
     devices = data.devices || [];
+    for (const device of devices) {
+      const job = device.job || {};
+      if (!job.master_image || !["writing", "verifying"].includes(job.state)) continue;
+      const snapshot = cloneJobs[device.device];
+      const copy = copyDisplay(snapshot ? snapshot.log : []);
+      if (snapshot && snapshot.state === "running" && job.state === "writing" && copy.partition) {
+        job.percent = copy.percent === null ? 0 : copy.percent;
+        job.indeterminate = copy.percent === null;
+        job.message = copy.percent === null ? `Scanning ${copy.partition} before copying…` : `Copying ${copy.partition}: ${copy.percent}%`;
+      }
+      const now = Date.now(), percent = Number(job.percent || 0);
+      const phase = copy.partition || job.state;
+      let timing = progressTiming.get(device.device);
+      if (!timing || phase !== timing.phase || percent < timing.percent) timing = {start:now, percent, phase, firstPercent:percent};
+      const elapsed = (now - timing.start) / 1000;
+      timing.percent = percent; progressTiming.set(device.device, timing);
+      job.message += ` · observed elapsed ${Math.floor(elapsed/60)}m ${Math.floor(elapsed%60)}s`;
+      if (percent > timing.firstPercent && percent < 100 && elapsed > 2) {
+        const seconds = Math.round(elapsed * (100-percent) / (percent-timing.firstPercent));
+        job.message += ` · partition ETA ${Math.floor(seconds/60)}m ${seconds%60}s`;
+      } else if (percent < 100) job.message += " · ETA estimating…";
+    }
     const present = new Set(devices.map(d => d.device));
     for (const s of [...selected]) if (!present.has(s)) selected.delete(s);
     if (!flashing) {
@@ -1072,12 +1200,14 @@ all selected cards are written in parallel</footer>
 
   async function startFlashing(devs) {
     if (!devs.length) return;
+    if ($("image_preset").value === "__piforge__" && !localImage) return alert("Choose your local PiForge image first.");
     const lines = devs.map(dev => {
       const d = devices.find(x => x.device === dev);
       return dev + (d && d.has_data ? ` (contains: ${(d.fstypes || []).join(", ")})` : "");
     });
+    const master = currentImageUrl().startsWith("master:");
     if (!confirm("PERMANENTLY ERASE everything on:\n\n" + lines.join("\n") +
-                 "\n\nand install Raspberry Pi OS. Continue?")) return;
+                 (master ? "\n\nand write the installed image with its existing partitions" + ($("inject_tailscale").checked ? " and inject Tailscale" : "") + ". Continue?" : "\n\nand install Raspberry Pi OS. Continue?"))) return;
     const config = readForm();
     const r = await fetch("/api/flash", {
       method: "POST",
@@ -1089,6 +1219,17 @@ all selected cards are written in parallel</footer>
     else { flashing = true; updateButton(); }
     poll();
   }
+
+  $("btn-make-image").addEventListener("click", async () => {
+    const cards = [...selected];
+    if (cards.length !== 1) return alert("Select exactly one master card.");
+    if (!$("master_name").value.trim()) return alert("Enter an image name.");
+    const response = await fetch("/api/clone", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({operation:"read", devices:cards, name:$("master_name").value.trim()})});
+    const result = await response.json();
+    if (result.error) alert(result.error);
+    else { flashing = true; updateButton(); }
+    poll();
+  });
 
   $("btn-flash").addEventListener("click", () => startFlashing([...selected].sort()));
 
@@ -1121,6 +1262,7 @@ all selected cards are written in parallel</footer>
 
   function setMode(m) {
     mode = m;
+    $("image-mode").style.display = m === "image" ? "" : "none";
     $("flash-mode").style.display = m === "flash" ? "" : "none";
     $("partition-mode").style.display = m === "partition" ? "" : "none";
     $("tailscale-mode").style.display = m === "tailscale" ? "" : "none";
@@ -1129,6 +1271,8 @@ all selected cards are written in parallel</footer>
     $("tab-tailscale").classList.toggle("active", m === "tailscale");
     updateButton();
   }
+  $("btn-image-section").addEventListener("click", () => setMode("image"));
+  $("btn-image-back").addEventListener("click", () => setMode("flash"));
   $("tab-flash").addEventListener("click", () => setMode("flash"));
   $("tab-partition").addEventListener("click", () => setMode("partition"));
   $("tab-tailscale").addEventListener("click", () => setMode("tailscale"));
@@ -1278,6 +1422,7 @@ all selected cards are written in parallel</footer>
   });
 
   async function startPartitioning(devs) {
+    if (currentImageUrl().startsWith("master:")) return alert("This installed image already includes its partitions. Continue to Tailscale.");
     if (!devs.length) return;
     let verb = keepExisting > 0
       ? `keep the first ${keepExisting} existing partition(s) and add ${partitions.length} new one(s) after them`
@@ -1333,6 +1478,7 @@ all selected cards are written in parallel</footer>
     try { data = JSON.parse(await file.text()); }
     catch (e) { alert("Couldn't read that file: " + e.message); return; }
 
+    if (!data || typeof data !== "object" || Array.isArray(data)) { alert("Select a PiForge settings JSON object."); return; }
     const hasConfig = data.config && typeof data.config === "object";
     const hasPartition = data.partition && Array.isArray(data.partition.partitions) && data.partition.partitions.length;
     const hasTailscale = data.tailscale && typeof data.tailscale === "object";
@@ -1342,7 +1488,7 @@ all selected cards are written in parallel</footer>
     }
 
     if (hasConfig || hasPartition) {
-      const name = prompt("Save this upload as profile name:", "");
+      const name = file.name.replace(/\.json$/i, "") || "Imported settings";
       if (name && name.trim()) {
         const profileName = name.trim();
         if (hasConfig) applyToForm(data.config);
@@ -1368,6 +1514,7 @@ all selected cards are written in parallel</footer>
           })).json();
           if (res.error) throw new Error(res.error);
           await refreshProfiles(profileName);
+          $("profile_name").value = profileName;
         } catch (e) {
           alert("Applied to the form, but saving profile '" + profileName + "' failed: " + e.message);
         }
@@ -1502,7 +1649,7 @@ all selected cards are written in parallel</footer>
   populateTimezones();
   populateKeymaps();
   populateImagePresets();
-  loadDefaults();
+  refreshSavedImages().then(loadDefaults);
   refreshProfiles();
   loadTailscaleConfig();
   setInterval(poll, 2000);

@@ -503,3 +503,14 @@ vulnerability privately rather than in a public issue.
 ## License
 
 MIT — see `LICENSE`.
+
+## Production master-card cloning
+
+Use the top-bar disc icon to open **Make image from card** and save a fully
+installed master. In Flash OS select **Custom built from PiForge**, choose its
+local .img file (keep its matching .json beside it), and burn batches
+of up to ten cards. Its partitions are preserved and the partition stage is
+skipped. Each copy gets unique first-boot identity and can continue directly
+to per-card Tailscale injection.
+See [the production workflow](PRODUCTION.md) for preparation, Tailscale
+enrollment, dashboard finalization and required physical-device checks.
