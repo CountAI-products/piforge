@@ -74,3 +74,42 @@ when EEPROM staging fails; do not treat that marker as a readiness signal.
 
 This repository adds the station workflow and a service-verification helper.
 It does not change or integrate your external admin dashboard.
+
+## Fast reusable block maps (1.2.2)
+
+New master images include a block_map in their existing .json companion file.
+An older image creates this map once before its first burn. Concurrent burns
+share the same map build through a file lock. Building reads the ext4 block-allocation bitmaps and sparse extents, includes
+zero-valued allocated blocks needed on reused cards, and calculates SHA-256
+checksums once; burning writes those extents and
+checks their hashes while copying, without running e2image on the source.
+Target filesystem checks and resizing still run. Copy progress is the mapped
+bytes across the whole image, followed by flushing, resize and verification.
+The sparse map may include allocated zero blocks, so mapped bytes can exceed
+actual nonzero data. On filesystems without sparse extent support the one-time
+map covers the full file. Never modify a source image or its metadata during a
+batch. A checksum failure requires recreating the image/map, not ignoring it.
+
+## Share an image with another person
+
+Share the .img and .json together. The JSON includes the reusable map and hashes;
+no separate third file is needed. To keep empty space small during transfer:
+
+```bash
+python3 /opt/piforge/share_image.py /home/USER/rpi-images/clones/master.img /path/master.tar.gz
+```
+
+This makes the map first if needed, then creates a sparse compressed archive
+with only the image and metadata. It excludes station settings and enrollment
+files outside the image. The master itself must still be cleaned of production
+data, registrations and credentials before it is shared.
+
+On the receiving Ubuntu PC:
+
+```bash
+tar -xzf master.tar.gz
+```
+
+In PiForge select Custom built from PiForge and browse to the extracted .img.
+Keep .json beside it. The included map is reused on that PC without another
+source scan. Writable metadata-folder access is needed for the map lock.

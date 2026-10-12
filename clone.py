@@ -20,6 +20,7 @@ separately with the existing per-card provisioning workflow after cloning.
 Images live in ~/rpi-images/clones/<name>.img (sparse) + <name>.json.
 Output lines starting with "STEP " / "PROGRESS " are for the PiForge app.
 """
+import blockmap
 import argparse
 import datetime
 import json
@@ -190,6 +191,23 @@ def parse_copy_progress(output, fstype, size):
     return min(100.0, int(match.group(1)) * 100 / size) if match and size else None
 
 
+def map_progress(label):
+    last = [0.0]
+    started = __import__('time').monotonic()
+    def report(done, total):
+        now = __import__('time').monotonic()
+        if now-last[0] < 1 and done != total:
+            return
+        last[0] = now
+        percent = done*100/total if total else 100
+        print(f"PROGRESS {label} {min(99, int(percent))}", flush=True)
+        elapsed = now-started
+        speed = done/elapsed if elapsed > 0 else 0
+        eta = (total-done)/speed if speed else -1
+        print(f"METRICS {done} {total} {elapsed:.1f} {eta:.1f} {speed:.0f}", flush=True)
+    return report
+
+
 def unmount_all(dev):
     out = subprocess.run(["lsblk", "-nrpo", "PATH,MOUNTPOINT", dev], capture_output=True, text=True).stdout
     for line in out.splitlines():
@@ -298,6 +316,8 @@ def read_master(dev, name):
     }
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
+    step("map")
+    blockmap.ensure(img, meta_path, map_progress("map"))
     for path in (img, meta_path):
         _chown_real(path)
     say(f"Saved {img}: {end * SECTOR / (1 << 30):.1f} GiB image, "
@@ -324,6 +344,8 @@ def write_copy(dev, name, hostname=None):
         raise CloneError("this image's last partition was shrunk when it was saved, and this PC's e2fsprogs "
                          "(older than 1.47) can't grow it back — the copy would have a full /home. "
                          "Write it from a PC with Ubuntu 24.04 or newer.")
+    step("map")
+    mapping = blockmap.ensure(img, meta_path, map_progress("map"))
     unmount_all(dev)
 
     step("table")
@@ -345,15 +367,16 @@ def write_copy(dev, name, hostname=None):
     step("copy")
     file_size = os.path.getsize(dev) if os.path.isfile(dev) else None   # an image file as the target
     fstypes = {p["num"]: p["fstype"] for p in meta["partitions"]}
-    for p in parts:
-        copy_partition(img, p["start"] * SECTOR, dev, p["start"] * SECTOR, p["size"] * SECTOR,
-                       fstypes.get(p["num"], ""), f"p{p['num']}")
+    print("COPY image", flush=True)
+    say("Writing reusable block map; no source filesystem scan")
+    blockmap.copy(img, dev, mapping, map_progress("image"))
     if file_size:   # e2image cuts a file target off at the end of what it copied
         with open(dev, "r+b") as f:
             f.truncate(file_size)
     # Again after the data, so nothing written above can have touched the
     # logical partitions' EBRs (see read_master).
     run(["sfdisk", "--quiet", "--no-reread", dev], input=sfdisk_script(table, sizes))
+    print("PROGRESS image 100", flush=True)
     run(["sync"])
     settle(dev)
 

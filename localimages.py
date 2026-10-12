@@ -44,6 +44,9 @@ def register(path):
     for part in expected:
         if clone.fs_type_at(str(image),part['start']*clone.SECTOR) != part['fstype']:
             raise ValueError('Image filesystem does not match its metadata')
+    if meta.get("block_map"):
+        import blockmap
+        blockmap.validate(meta["block_map"], image.stat().st_size)
     name = 'local-' + hashlib.sha256(str(image).encode()).hexdigest()[:16]
     if image.parent == Path(clone.CLONE_DIR).resolve():
         return {'name':image.stem, 'path':str(image)}

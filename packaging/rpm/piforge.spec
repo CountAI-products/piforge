@@ -62,6 +62,8 @@ install -m 0644 PRODUCTION.md %{buildroot}/opt/piforge/PRODUCTION.md
 install -m 0644 dashboard-finalize.sh %{buildroot}/opt/piforge/dashboard-finalize.sh
 install -m 0644 clone.py %{buildroot}/opt/piforge/clone.py
 install -m 0644 cloning.py %{buildroot}/opt/piforge/cloning.py
+install -m 0644 blockmap.py %{buildroot}/opt/piforge/blockmap.py
+install -m 0644 share_image.py %{buildroot}/opt/piforge/share_image.py
 install -m 0644 localimages.py %{buildroot}/opt/piforge/localimages.py
 install -m 0755 firstrun_gen.py %{buildroot}/opt/piforge/firstrun_gen.py
 install -m 0644 config.example.json %{buildroot}/opt/piforge/config.example.json

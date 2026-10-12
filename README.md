@@ -514,3 +514,17 @@ skipped. Each copy gets unique first-boot identity and can continue directly
 to per-card Tailscale injection.
 See [the production workflow](PRODUCTION.md) for preparation, Tailscale
 enrollment, dashboard finalization and required physical-device checks.
+
+### Fast burns and sharing (1.2.2)
+
+PiForge saves a reusable, checksummed block map inside each image's .json file.
+Older images generate it once on their first burn. Subsequent burns copy mapped
+blocks without scanning source ext4 inodes; target filesystem checks remain.
+Share .img + .json together or create a sparse compressed archive using:
+
+```bash
+python3 /opt/piforge/share_image.py /path/master.img /path/master.tar.gz
+```
+
+The recipient extracts the archive and selects the .img in the existing local
+image picker. The block map travels with the image and is reused on their PC.

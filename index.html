@@ -1126,6 +1126,7 @@ all selected cards are written in parallel</footer>
   function copyDisplay(log) {
     let partition = null, percent = null;
     for (const line of log || []) {
+      if (line.startsWith("STEP ") && line !== "STEP copy") { partition = null; percent = null; }
       if (line.startsWith("COPY ")) { partition = line.split(/\s+/)[1]; percent = null; }
       if (line.startsWith("PROGRESS ")) {
         const fields = line.split(/\s+/);
@@ -1156,7 +1157,7 @@ all selected cards are written in parallel</footer>
       if (snapshot && snapshot.state === "running" && job.state === "writing" && copy.partition) {
         job.percent = copy.percent === null ? 0 : copy.percent;
         job.indeterminate = copy.percent === null;
-        job.message = copy.percent === null ? `Scanning ${copy.partition} before copying…` : `Copying ${copy.partition}: ${copy.percent}%`;
+        job.message = copy.percent === null ? `Scanning ${copy.partition} before copying…` : `Copying ${copy.partition === "image" ? "whole image" : copy.partition}: ${copy.percent}%`;
       }
       const now = Date.now(), percent = Number(job.percent || 0);
       const phase = copy.partition || job.state;
@@ -1167,7 +1168,7 @@ all selected cards are written in parallel</footer>
       job.message += ` · observed elapsed ${Math.floor(elapsed/60)}m ${Math.floor(elapsed%60)}s`;
       if (percent > timing.firstPercent && percent < 100 && elapsed > 2) {
         const seconds = Math.round(elapsed * (100-percent) / (percent-timing.firstPercent));
-        job.message += ` · partition ETA ${Math.floor(seconds/60)}m ${seconds%60}s`;
+        job.message += ` · copy ETA ${Math.floor(seconds/60)}m ${seconds%60}s`;
       } else if (percent < 100) job.message += " · ETA estimating…";
     }
     const present = new Set(devices.map(d => d.device));

@@ -35,6 +35,8 @@ cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/firstrun_gen.py \
       "${REPO_DIR}"/clone.py \
       "${REPO_DIR}"/cloning.py \
+      "${REPO_DIR}"/blockmap.py \
+      "${REPO_DIR}"/share_image.py \
       "${REPO_DIR}"/localimages.py \
       "${REPO_DIR}"/PRODUCTION.md \
       "${REPO_DIR}"/dashboard-finalize.sh \
@@ -64,7 +66,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE_KB}
-Depends: python3, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, util-linux, coreutils, xz-utils, openssl, wpasupplicant, parted, dosfstools, e2fsprogs (>= 1.47), udev, gnupg, jq, curl, pkexec, polkitd
+Depends: python3, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, util-linux, coreutils, xz-utils, openssl, wpasupplicant, parted, dosfstools, e2fsprogs (>= 1.47), udev, gnupg, jq, curl, pkexec, polkitd, tar, gzip
 Maintainer: PiForge contributors <noreply@example.invalid>
 Homepage: https://github.com/CountAI-products/piforge
 Description: Mass SD card installer for Raspberry Pi OS

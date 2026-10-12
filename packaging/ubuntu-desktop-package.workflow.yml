@@ -1,0 +1,29 @@
+name: Ubuntu desktop package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu: ['24.04', '26.04']
+    container: ubuntu:${{ matrix.ubuntu }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and install with native Ubuntu dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3 dpkg-dev
+          bash packaging/build-deb.sh
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ./packaging/dist/piforge_*_all.deb
+      - name: Check desktop runtime and tests
+        run: |
+          python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("WebKit2", "4.1"); from gi.repository import Gtk, WebKit2'
+          python3 -m unittest discover -s tests -v
+          python3 -m py_compile /usr/bin/piforge /opt/piforge/server.py /opt/piforge/blockmap.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: piforge-ubuntu-${{ matrix.ubuntu }}
+          path: packaging/dist/*.deb

@@ -72,6 +72,10 @@ def start(server, request):
                     partition = text.split()[1]
                     phase_started = time.monotonic()
                     server.set_job(device, percent=0, message=f'Copying {partition}; estimating time…')
+                elif text.startswith('METRICS '):
+                    _, done, total, elapsed, remaining, speed = text.split()
+                    server.set_job(device, elapsed_s=float(elapsed), eta_s=float(remaining),
+                                   message=f'Writing mapped blocks · {float(done)/1e9:.2f}/{float(total)/1e9:.2f} GB · {float(speed)/1e6:.1f} MB/s · ETA {server.format_duration(float(remaining)) if float(remaining)>=0 else "estimating"}')
                 elif text.startswith('STEP '):
                     phase = text[5:]
                     server.set_job(device, percent=0, state='verifying' if phase == 'verify' else 'writing', message=f'{phase}: {"master capture" if operation == "read" else "installed image"}')
