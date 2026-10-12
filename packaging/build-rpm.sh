@@ -38,6 +38,7 @@ cp -p "${REPO_DIR}"/server.py \
       "${REPO_DIR}"/cloning.py \
       "${REPO_DIR}"/blockmap.py \
       "${REPO_DIR}"/share_image.py \
+      "${REPO_DIR}"/image_share_jobs.py \
       "${REPO_DIR}"/localimages.py \
       "${REPO_DIR}"/operator_auth.py \
       "${REPO_DIR}"/PRODUCTION.md \

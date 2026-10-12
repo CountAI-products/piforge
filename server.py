@@ -1654,6 +1654,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 self._json({"error": str(error)}, 400)
             return
+        if path == "/api/image-share":
+            import image_share_jobs
+            self._json(image_share_jobs.snapshot())
+            return
         if path == "/api/clones":
             import clone, cloning
             self._json({"images": clone.list_images(), "jobs": cloning.snapshot(), "active": FLASH_ACTIVE.is_set()})
@@ -1682,9 +1686,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "index.html missing"}, 404)
         elif path == "/api/devices":
             try:
+                import image_share_jobs
+                sharing=image_share_jobs.snapshot()["state"] in ("preparing","compressing")
                 self._json({
                     "devices": list_devices(),
-                    "flashing": FLASH_ACTIVE.is_set(),
+                    "flashing": FLASH_ACTIVE.is_set() or sharing,
+                    "sharing": sharing,
                     "prep": PREP_STATE,
                     "image_cached": os.path.exists(RAW_IMAGE),
                     "image_url": current_image_url(),
@@ -1757,6 +1764,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"user":user})
             except Exception as error:
                 self._json({"error":str(error)},400)
+            return
+        if parsed.path == "/api/image-share":
+            try:
+                if FLASH_ACTIVE.is_set():raise ValueError("Wait for card preparation to finish")
+                import image_share_jobs
+                image_share_jobs.start(json.loads(body).get("name",""))
+                self._json({"ok":True})
+            except Exception as error:self._json({"error":str(error)},400)
             return
         if parsed.path == "/api/local-image":
             try:

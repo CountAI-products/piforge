@@ -310,6 +310,7 @@
     <button type="button" class="icon-btn" id="btn-bundle-download" title="Download settings + partition layout">⬇</button>
     <input type="file" id="bundle_file" accept="application/json,.json" style="display:none">
     <button type="button" class="icon-btn" id="btn-image-section" title="Make image from card" aria-label="Make image from card">💿</button>
+    <button type="button" class="icon-btn" id="btn-share-section" title="Create shareable image" aria-label="Create shareable image">📦</button>
     <button type="button" class="secondary" id="btn-operator">Sign in / Register</button>
     <button type="button" class="icon-btn" id="btn-history" title="Flash history">🕘</button>
     <div class="counter">Cards done: <b id="count">0</b></div>
@@ -345,6 +346,16 @@
       <button type="button" class="secondary" id="btn-make-image">Make image from selected card</button>
       <div class="hint">Select one fully installed, cleanly shut-down master card. Its complete partition layout and software are saved.</div>
 <p class="hint">Saved images live in the station's rpi-images/clones folder. Keep the .img and matching .json together when moving them.</p><button class="secondary" id="btn-image-back">Return to Flash OS</button></section>
+  </div>
+  <div class="mode-body" id="share-mode" style="display:none">
+    <section class="panel"><h2>Create shareable file</h2>
+    <label for="share-image">Saved image</label><select id="share-image"></select>
+    <p class="hint">Creates one compressed .tar.gz containing the image and its JSON block map. The recipient extracts it and selects the .img in PiForge.</p>
+    <button class="primary" id="btn-create-share" disabled>Create shareable file</button>
+    <p class="hint" id="share-status">Choose a saved image.</p><p id="share-path" style="word-break:break-all"></p>
+    <button class="secondary" id="btn-copy-share" disabled>Copy file location</button>
+    <p class="hint">Archives are saved in rpi-images/clones/shared. Only share a clean master without production records or device credentials.</p>
+    </section>
   </div>
   <div class="mode-body" id="flash-mode">
     <section class="panel">
@@ -601,7 +612,7 @@ all selected cards are written in parallel</footer>
 <dialog id="local-image-dialog" style="max-width:700px;width:90%;max-height:80vh;overflow:auto"><h2>Select PiForge image</h2><p>Select a file on this Ubuntu station. It is used directly, without uploading or copying the full image.</p><input id="local-folder" placeholder="Folder path"><button id="btn-folder-go">Open folder</button><button id="btn-folder-up">Parent folder</button><div id="local-folder-files"></div><p id="local-folder-error"></p><button id="btn-folder-close">Close</button></dialog>
 <script>
   const $ = id => document.getElementById(id);
-  let devices = [], flashing = false, wasFlashing = false, misses = 0;
+  let devices = [], flashing = false, sharing = false, wasFlashing = false, misses = 0;
   const selected = new Set();
   const BUSY = ["queued", "downloading", "writing", "verifying", "configuring",
                 "partitioning", "formatting", "tailscale", "cancelling"];
@@ -792,6 +803,10 @@ all selected cards are written in parallel</footer>
       select.insertBefore(option, select.querySelector('option[value="__custom__"]'));
     }
     if ([...select.options].some(option => option.value === previous)) select.value = previous;
+    const chosen=$("share-image").value;
+    $("share-image").replaceChildren();
+    for(const image of data.images){const option=document.createElement("option");option.value=image.name;option.textContent=image.display_name || image.name;$("share-image").append(option);}
+    if([...$("share-image").options].some(option=>option.value===chosen))$("share-image").value=chosen;
     updateImageFlow();
   }
 
@@ -1130,7 +1145,7 @@ all selected cards are written in parallel</footer>
   function updateButton() {
     const btn = $("btn-flash");
     const cancelBtn = $("btn-cancel-batch");
-    cancelBtn.style.display = flashing ? "block" : "none";
+    cancelBtn.style.display = flashing && !sharing ? "block" : "none";
     const n = selected.size;
     $("btn-make-image").disabled = flashing || n !== 1;
     if (flashing) { btn.disabled = true; btn.textContent = "FLASHING…"; }
@@ -1183,6 +1198,7 @@ all selected cards are written in parallel</footer>
     let cloneJobs = {};
     try { cloneJobs = (await (await fetch("/api/clones")).json()).jobs || {}; } catch {}
     flashing = data.flashing;
+    sharing = !!data.sharing;
     devices = data.devices || [];
     for (const device of devices) {
       const job = device.job || {};
@@ -1304,6 +1320,7 @@ all selected cards are written in parallel</footer>
 
   function setMode(m) {
     mode = m;
+    $("share-mode").style.display = m === "share" ? "" : "none";
     $("image-mode").style.display = m === "image" ? "" : "none";
     $("flash-mode").style.display = m === "flash" ? "" : "none";
     $("partition-mode").style.display = m === "partition" ? "" : "none";
@@ -1313,6 +1330,20 @@ all selected cards are written in parallel</footer>
     $("tab-tailscale").classList.toggle("active", m === "tailscale");
     updateButton();
   }
+  let sharePath="";
+  async function pollShare(){
+    try {const state=await(await fetch("/api/image-share")).json();
+      $("share-status").textContent=state.message+(state.seconds ? " · elapsed "+state.seconds+" s" : "");
+      $("btn-create-share").disabled=["preparing","compressing"].includes(state.state) || !$("share-image").value;
+      sharePath=state.state==="done" ? state.path : "";
+      $("share-path").textContent=sharePath;
+      $("btn-copy-share").disabled=!sharePath;
+    }catch{ $("share-status").textContent="Restart PiForge to load the sharing feature."; }
+  }
+  $("btn-share-section").onclick=()=>{setMode("share");refreshSavedImages();pollShare()};
+  $("btn-create-share").onclick=async()=>{const result=await(await fetch("/api/image-share",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("share-image").value})})).json();if(result.error)alert(result.error);pollShare()};
+  $("btn-copy-share").onclick=async()=>{try{await navigator.clipboard.writeText(sharePath)}catch{const range=document.createRange();range.selectNodeContents($("share-path"));window.getSelection().removeAllRanges();window.getSelection().addRange(range)}};
+  setInterval(()=>{if(mode==="share")pollShare()},2000);
   $("btn-image-section").addEventListener("click", () => setMode("image"));
   $("btn-image-back").addEventListener("click", () => setMode("flash"));
   $("tab-flash").addEventListener("click", () => setMode("flash"));

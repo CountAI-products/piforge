@@ -151,3 +151,15 @@ Existing burned cards are not modified by upgrading the station. Apply the above
 command on those Pis, or re-inject the updated first-boot provisioning on a card
 before its initial boot. Physical SSH and subnet connectivity remain to be tested
 with your actual tailnet access policy.
+
+
+## Create a shareable file from the desktop (1.3.2)
+
+Click the top-bar package icon (Create shareable image), choose a saved image,
+and click Create shareable file. PiForge prepares the map and compresses the
+image and matching JSON into a single sparse .tar.gz archive. Status and elapsed
+time update during preparation/compression; compression has no percentage ETA.
+The resulting path is shown and can be copied. Archives are stored in
+rpi-images/clones/shared. The recipient extracts the archive and selects the
+.img through Custom built from PiForge; the companion JSON stays alongside it.
+Archive creation does not send files to another person automatically.

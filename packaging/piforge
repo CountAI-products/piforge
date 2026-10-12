@@ -111,10 +111,10 @@ class PiForgeWindow(Gtk.ApplicationWindow):
             dialog = Gtk.MessageDialog(
                 transient_for=self, flags=0, message_type=Gtk.MessageType.WARNING,
                 buttons=Gtk.ButtonsType.YES_NO,
-                text="A flash is in progress")
+                text="A card or archive operation is in progress")
             dialog.format_secondary_text(
-                "Closing PiForge now will stop the server and leave any card "
-                "that's writing incomplete. Close anyway?")
+                "Closing PiForge now may interrupt the operation and leave "
+                "its output incomplete. Close anyway?")
             response = dialog.run()
             dialog.destroy()
             if response != Gtk.ResponseType.YES:

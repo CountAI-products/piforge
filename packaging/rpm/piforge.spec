@@ -64,6 +64,7 @@ install -m 0644 clone.py %{buildroot}/opt/piforge/clone.py
 install -m 0644 cloning.py %{buildroot}/opt/piforge/cloning.py
 install -m 0644 blockmap.py %{buildroot}/opt/piforge/blockmap.py
 install -m 0644 share_image.py %{buildroot}/opt/piforge/share_image.py
+install -m 0644 image_share_jobs.py %{buildroot}/opt/piforge/image_share_jobs.py
 install -m 0644 localimages.py %{buildroot}/opt/piforge/localimages.py
 install -m 0644 operator_auth.py %{buildroot}/opt/piforge/operator_auth.py
 install -m 0755 firstrun_gen.py %{buildroot}/opt/piforge/firstrun_gen.py
