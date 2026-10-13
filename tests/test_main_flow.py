@@ -41,6 +41,12 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(server.JOBS['/dev/test-card']['operator_session'],'test-session')
             server.FLASH_ACTIVE.clear()
 
+    def test_flash_checks_selected_image_even_when_an_image_is_cached(self):
+        selected='https://downloads.raspberrypi.com/raspios_lite_arm64_latest'
+        with patch('server.os.path.exists',return_value=True),patch('server.prepare_image') as prepare,patch('server.check_cancelled',side_effect=[None,server.Cancelled()]),patch('server.log_history'),patch('server.set_job'):
+            server.flash_device('/dev/test-card',{'image_url':selected},'test')
+        prepare.assert_called_once_with(selected)
+
     def test_finished_card_cannot_be_repartitioned(self):
         with patch.dict(server.JOBS, {'/dev/sdb':{'master_image':True}}):
             with self.assertRaisesRegex(ValueError,'already contain partitions'):

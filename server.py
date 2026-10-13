@@ -650,9 +650,8 @@ def flash_device(dev, cfg, hostname, static_ip=None):
     try:
         check_cancelled(dev)  # cancelled while still queued, before any work
 
-        if not os.path.exists(RAW_IMAGE):
-            set_job(dev, state="downloading", percent=0, message="Preparing image (once)…")
-            prepare_image(image_url)
+        set_job(dev, state="downloading", percent=0, message="Checking selected image…")
+        prepare_image(image_url)
 
         check_cancelled(dev)
         total = os.path.getsize(RAW_IMAGE)
