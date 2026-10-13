@@ -1643,9 +1643,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/operator":
             try:
                 user=operator_auth.current(load_tailscale_config())
-                self._json({"user":user})
-            except Exception:
-                self._json({"user":None})
+                self._json({"user":user,"server":operator_auth.base_url(load_tailscale_config())})
+            except Exception as error:
+                self._json({"user":None,"error":str(error)},400)
             return
         if path == "/api/local-images":
             try:

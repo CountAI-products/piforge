@@ -608,7 +608,17 @@ all selected cards are written in parallel</footer>
   </div>
 </div>
 
-<dialog id="operator-dialog" style="max-width:440px;width:90%;padding:24px"><h2>PiForge operator account</h2><p>Accounts are authenticated and stored by the ledger server.</p><label>Username</label><input id="operator-username" autocomplete="username"><label>Password</label><input id="operator-password" type="password" autocomplete="current-password"><p class="hint">New accounts require a password of at least 12 characters. Configure the server mint endpoint and station authorization in Tailscale settings first.</p><p id="operator-error"></p><div class="btnrow"><button id="operator-login">Sign in</button><button id="operator-register">Register account</button><button id="operator-logout">Sign out</button><button id="operator-close">Close</button></div></dialog>
+<dialog id="operator-dialog" style="max-width:460px;width:90%;padding:24px">
+<h2 id="operator-title">Sign in to PiForge</h2><p class="hint" id="operator-server">Checking ledger server…</p>
+<div class="btnrow"><button type="button" id="operator-tab-login">Sign in</button><button type="button" id="operator-tab-register">Register</button></div>
+<form id="operator-form"><label for="operator-username">Username</label><input id="operator-username" autocomplete="username" required minlength="3" maxlength="32">
+<label for="operator-password">Password</label><input id="operator-password" type="password" autocomplete="current-password" required maxlength="256">
+<label class="check"><input id="operator-show-password" type="checkbox">Show password</label>
+<div id="operator-confirm-wrap" hidden><label for="operator-confirm">Confirm password</label><input id="operator-confirm" type="password" autocomplete="new-password" maxlength="256"><p class="hint">3–32 characters for username: letters, numbers, dots, underscores or hyphens. Password: at least 12 characters.</p></div>
+<p id="operator-error" role="status" aria-live="polite"></p><button type="submit" class="primary" id="operator-submit">Sign in</button></form>
+<div id="operator-signed-in" hidden><p id="operator-user-info"></p><button type="button" id="operator-logout">Sign out</button></div>
+<div class="btnrow"><button type="button" id="operator-settings">Server settings</button><button type="button" id="operator-close">Close</button></div>
+</dialog>
 <dialog id="local-image-dialog" style="max-width:700px;width:90%;max-height:80vh;overflow:auto"><h2>Select PiForge image</h2><p>Select a file on this Ubuntu station. It is used directly, without uploading or copying the full image.</p><input id="local-folder" placeholder="Folder path"><button id="btn-folder-go">Open folder</button><button id="btn-folder-up">Parent folder</button><div id="local-folder-files"></div><p id="local-folder-error"></p><button id="btn-folder-close">Close</button></dialog>
 <script>
   const $ = id => document.getElementById(id);
@@ -736,34 +746,66 @@ all selected cards are written in parallel</footer>
     ["Raspberry Pi OS Legacy Bookworm (64-bit, Full)", "https://downloads.raspberrypi.com/raspios_oldstable_full_arm64_latest"],
   ];
 
-  let operatorUser=null;
-  async function refreshOperator() {
-    try {
-      const result=await (await fetch("/api/operator")).json();
-      operatorUser=result.user || null;
-      $("btn-operator").textContent=operatorUser ? operatorUser.username + " · Account" : "Sign in / Register";
-      $("operator-attribution").textContent=operatorUser ? "Authenticated installer: " + operatorUser.username : "Sign in to record the authenticated installer on each card.";
-      $("installer").value=operatorUser ? operatorUser.username : "";
-    } catch {operatorUser=null;}
+  let operatorUser=null, operatorMode="login", operatorBusy=false;
+  function setOperatorMode(mode){
+    operatorMode=mode;$("operator-title").textContent=mode==="register" ? "Register a PiForge account" : "Sign in to PiForge";
+    $("operator-confirm-wrap").hidden=mode!=="register";
+    $("operator-confirm").required=mode==="register";
+    $("operator-password").autocomplete=mode==="register" ? "new-password" : "current-password";
+    $("operator-password").minLength=mode==="register" ? 12 : 1;
+    $("operator-submit").textContent=mode==="register" ? "Create account & sign in" : "Sign in";
+    $("operator-error").textContent="";
   }
-  async function operatorAction(action) {
-    $("operator-error").textContent="Contacting server…";
-    try {
-      const result=await (await fetch("/api/operator/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("operator-username").value.trim(),password:$("operator-password").value})})).json();
-      if(result.error) throw new Error(result.error);
-      $("operator-password").value="";
-      await refreshOperator();
+  function showOperatorUser(){
+    $("btn-operator").textContent=operatorUser ? operatorUser.username + " · Account" : "Sign in / Register";
+    $("operator-attribution").textContent=operatorUser ? "Authenticated installer: " + operatorUser.username : "Sign in to record the authenticated installer on each card.";
+    $("installer").value=operatorUser ? operatorUser.username : "";
+    $("operator-form").hidden=!!operatorUser;$("operator-signed-in").hidden=!operatorUser;
+    $("operator-user-info").textContent=operatorUser ? "Signed in as " + operatorUser.username : "";
+    $("operator-tab-login").hidden=$("operator-tab-register").hidden=!!operatorUser;
+  }
+  async function operatorFetch(path,payload){
+    const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),45000);
+    let response;
+    try{response=await fetch(path,{method:payload ? "POST" : "GET",headers:payload ? {"Content-Type":"application/json"} : {},body:payload ? JSON.stringify(payload) : undefined,signal:controller.signal});}
+    finally{clearTimeout(timer); }
+    let result;try{result=await response.json()}catch{throw new Error("PiForge returned an invalid response. Restart the updated application.")}
+    if(!response.ok || result.error)throw new Error(result.error || (response.status===404 ? "Update both PiForge and the ledger server to enable accounts." : "Server rejected the request."));
+    return result;
+  }
+  async function refreshOperator(){
+    try{
+      const result=await operatorFetch("/api/operator");operatorUser=result.user || null;
+      $("operator-server").textContent=result.server ? "Ledger server: " + result.server : "Configure the ledger endpoint and authorization token in Server settings.";
+      showOperatorUser();
+    }catch(error){$("operator-server").textContent=error.message;}
+  }
+  async function operatorAction(action){
+    if(operatorBusy)return;
+    if(action==="register" && $("operator-password").value!==$("operator-confirm").value){$("operator-error").textContent="Passwords do not match.";return;}
+    operatorBusy=true;$("operator-error").textContent=action==="register" ? "Creating account…" : action==="logout" ? "Signing out…" : "Signing in…";
+    const buttons=["operator-submit","operator-tab-login","operator-tab-register","operator-logout","operator-close","operator-settings"];
+    buttons.forEach(id=>$(id).disabled=true);
+    const label=$("operator-submit").textContent;$("operator-submit").textContent="Please wait…";
+    try{
+      const result=await operatorFetch("/api/operator/"+action,{username:$("operator-username").value.trim(),password:$("operator-password").value});
+      operatorUser=result.user || null;showOperatorUser();
+      $("operator-password").value=$("operator-confirm").value="";
       $("operator-error").textContent=action==="logout" ? "Signed out." : "Signed in successfully.";
-      if(action!=="logout") $("operator-dialog").close();
-    } catch(error) {$("operator-password").value="";$("operator-error").textContent=error.message;}
+      if(action!=="logout")$("operator-dialog").close();
+    }catch(error){$("operator-error").textContent=["TimeoutError","AbortError"].includes(error.name) ? "Server timed out. Check connectivity and try again." : error.message;}
+    finally{operatorBusy=false;buttons.forEach(id=>$(id).disabled=false);$("operator-submit").textContent=label;}
   }
-  $("btn-operator").onclick=()=>$("operator-dialog").showModal();
-  $("operator-close").onclick=()=>{$("operator-password").value="";$("operator-dialog").close()};
-  $("operator-login").onclick=()=>operatorAction("login");
-  $("operator-register").onclick=()=>operatorAction("register");
+  $("btn-operator").onclick=()=>{$("operator-dialog").showModal();refreshOperator();$("operator-username").focus()};
+  $("operator-close").onclick=()=>{if(operatorBusy)return;$("operator-password").value=$("operator-confirm").value="";$("operator-dialog").close()};
+  $("operator-dialog").addEventListener("cancel",event=>{if(operatorBusy)event.preventDefault()});
+  $("operator-form").onsubmit=event=>{event.preventDefault();operatorAction(operatorMode)};
+  $("operator-tab-login").onclick=()=>setOperatorMode("login");
+  $("operator-tab-register").onclick=()=>setOperatorMode("register");
+  $("operator-show-password").onchange=event=>{$("operator-password").type=$("operator-confirm").type=event.target.checked ? "text" : "password"};
   $("operator-logout").onclick=()=>operatorAction("logout");
-  setInterval(refreshOperator,30000);
-  refreshOperator();
+  $("operator-settings").onclick=()=>{$("operator-password").value=$("operator-confirm").value="";$("operator-dialog").close();setMode("tailscale")};
+  setInterval(refreshOperator,30000);refreshOperator();
   let savedImages = [];
   let localImage = null;
   function populateImagePresets() {
