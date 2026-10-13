@@ -763,7 +763,6 @@ all selected cards are written in parallel</footer>
     $("installer").value=operatorUser ? operatorUser.username : "";
     document.querySelector("main").style.visibility=operatorUser ? "visible" : "hidden";
     if(!operatorUser && !$("operator-dialog").open)$("operator-dialog").showModal();
-    if(operatorUser && $("operator-dialog").open && !operatorBusy)$("operator-dialog").close();
     $("operator-close").hidden=!operatorUser;
     $("operator-form").hidden=!!operatorUser;$("operator-signed-in").hidden=!operatorUser;
     $("operator-user-info").textContent=operatorUser ? "Signed in as " + operatorUser.username : "";
