@@ -1,12 +1,32 @@
 """Station-to-ledger login proxy. Credentials and sessions are never saved locally."""
 import ipaddress
 import json
+import os
+from pathlib import Path
 import threading
 import urllib.parse
 import urllib.request
 
 LOCK=threading.Lock()
 SESSION=None
+STORE=None
+
+def configure_store(path):
+    global STORE,SESSION
+    STORE=Path(path)
+    if STORE.is_file():
+        try:SESSION=json.loads(STORE.read_text())
+        except (OSError,ValueError):SESSION=None
+
+def save_session():
+    if STORE is None:return
+    STORE.parent.mkdir(parents=True,exist_ok=True)
+    if SESSION is None:
+        STORE.unlink(missing_ok=True);return
+    temporary=STORE.with_suffix(".tmp")
+    descriptor=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o600)
+    with os.fdopen(descriptor,"w") as file:json.dump(SESSION,file)
+    os.chmod(temporary,0o600);os.replace(temporary,STORE)
 
 class ServerAuthError(ValueError):
     def __init__(self,message,status):
@@ -51,7 +71,9 @@ def login(config,username,password,register=False):
     if register and 'token' not in result:
         try:result=request(config,'/auth/login',{'username':username,'password':password})
         except ValueError as error:raise ValueError('Account was created. Switch to Sign in and try again. '+str(error)) from None
-    with LOCK:SESSION={'base':base_url(config),'token':result['token'],'user':result['user']}
+    with LOCK:
+        SESSION={'base':base_url(config),'token':result['token'],'user':result['user']}
+        save_session()
     return result['user']
 
 
@@ -65,7 +87,8 @@ def current(config,verify=True):
             return result.get('user')
         except ServerAuthError as error:
             if error.status==401:
-                with LOCK:SESSION=None
+                with LOCK:
+                    SESSION=None;save_session()
                 return None
             raise
     return snapshot['user']
@@ -80,5 +103,5 @@ def token(config):
 
 def logout(config):
     global SESSION
-    with LOCK:snapshot=SESSION;SESSION=None
+    with LOCK:snapshot=SESSION;SESSION=None;save_session()
     if snapshot:request(config,'/auth/logout',{},snapshot['token'])

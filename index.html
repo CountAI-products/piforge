@@ -617,6 +617,7 @@ all selected cards are written in parallel</footer>
 <div id="operator-confirm-wrap" hidden><label for="operator-confirm">Confirm password</label><input id="operator-confirm" type="password" autocomplete="new-password" maxlength="256"><p class="hint">3–32 characters for username: letters, numbers, dots, underscores or hyphens. Password: at least 12 characters.</p></div>
 <p id="operator-error" role="status" aria-live="polite"></p><button type="submit" class="primary" id="operator-submit">Sign in</button></form>
 <div id="operator-signed-in" hidden><p id="operator-user-info"></p><button type="button" id="operator-logout">Sign out</button></div>
+<div id="operator-config-wrap" hidden><label>Ledger mint endpoint</label><input id="operator-endpoint" placeholder="http://100.x.x.x:9010/mint"><label>Station authorization token</label><input id="operator-station-token" type="password" autocomplete="off"><button type="button" id="operator-save-settings">Save server settings</button></div>
 <div class="btnrow"><button type="button" id="operator-settings">Server settings</button><button type="button" id="operator-close">Close</button></div>
 </dialog>
 <dialog id="local-image-dialog" style="max-width:700px;width:90%;max-height:80vh;overflow:auto"><h2>Select PiForge image</h2><p>Select a file on this Ubuntu station. It is used directly, without uploading or copying the full image.</p><input id="local-folder" placeholder="Folder path"><button id="btn-folder-go">Open folder</button><button id="btn-folder-up">Parent folder</button><div id="local-folder-files"></div><p id="local-folder-error"></p><button id="btn-folder-close">Close</button></dialog>
@@ -760,6 +761,10 @@ all selected cards are written in parallel</footer>
     $("btn-operator").textContent=operatorUser ? operatorUser.username + " · Account" : "Sign in / Register";
     $("operator-attribution").textContent=operatorUser ? "Authenticated installer: " + operatorUser.username : "Sign in to record the authenticated installer on each card.";
     $("installer").value=operatorUser ? operatorUser.username : "";
+    document.querySelector("main").style.visibility=operatorUser ? "visible" : "hidden";
+    if(!operatorUser && !$("operator-dialog").open)$("operator-dialog").showModal();
+    if(operatorUser && $("operator-dialog").open && !operatorBusy)$("operator-dialog").close();
+    $("operator-close").hidden=!operatorUser;
     $("operator-form").hidden=!!operatorUser;$("operator-signed-in").hidden=!operatorUser;
     $("operator-user-info").textContent=operatorUser ? "Signed in as " + operatorUser.username : "";
     $("operator-tab-login").hidden=$("operator-tab-register").hidden=!!operatorUser;
@@ -770,6 +775,7 @@ all selected cards are written in parallel</footer>
     try{response=await fetch(path,{method:payload ? "POST" : "GET",headers:payload ? {"Content-Type":"application/json"} : {},body:payload ? JSON.stringify(payload) : undefined,signal:controller.signal});}
     finally{clearTimeout(timer); }
     let result;try{result=await response.json()}catch{throw new Error("PiForge returned an invalid response. Restart the updated application.")}
+    if(response.status===404)throw new Error("An older PiForge server is running. Close it and restart the updated desktop application.");
     if(!response.ok || result.error)throw new Error(result.error || (response.status===404 ? "Update both PiForge and the ledger server to enable accounts." : "Server rejected the request."));
     return result;
   }
@@ -778,7 +784,7 @@ all selected cards are written in parallel</footer>
       const result=await operatorFetch("/api/operator");operatorUser=result.user || null;
       $("operator-server").textContent=result.server ? "Ledger server: " + result.server : "Configure the ledger endpoint and authorization token in Server settings.";
       showOperatorUser();
-    }catch(error){$("operator-server").textContent=error.message;}
+    }catch(error){$("operator-server").textContent=error.message;operatorUser=null;showOperatorUser();}
   }
   async function operatorAction(action){
     if(operatorBusy)return;
@@ -798,13 +804,19 @@ all selected cards are written in parallel</footer>
   }
   $("btn-operator").onclick=()=>{$("operator-dialog").showModal();refreshOperator();$("operator-username").focus()};
   $("operator-close").onclick=()=>{if(operatorBusy)return;$("operator-password").value=$("operator-confirm").value="";$("operator-dialog").close()};
-  $("operator-dialog").addEventListener("cancel",event=>{if(operatorBusy)event.preventDefault()});
+  $("operator-dialog").addEventListener("cancel",event=>{if(operatorBusy || !operatorUser)event.preventDefault()});
   $("operator-form").onsubmit=event=>{event.preventDefault();operatorAction(operatorMode)};
   $("operator-tab-login").onclick=()=>setOperatorMode("login");
   $("operator-tab-register").onclick=()=>setOperatorMode("register");
   $("operator-show-password").onchange=event=>{$("operator-password").type=$("operator-confirm").type=event.target.checked ? "text" : "password"};
   $("operator-logout").onclick=()=>operatorAction("logout");
-  $("operator-settings").onclick=()=>{$("operator-password").value=$("operator-confirm").value="";$("operator-dialog").close();setMode("tailscale")};
+  $("operator-settings").onclick=async()=>{
+    $("operator-config-wrap").hidden=!$("operator-config-wrap").hidden;
+    if(!$("operator-config-wrap").hidden){try{const config=await operatorFetch("/api/tailscale-config");$("operator-endpoint").value=config.mint_endpoint || "";$("operator-station-token").value=config.ledger_auth_token || "";}catch(error){$("operator-error").textContent=error.message;}}
+  };
+  $("operator-save-settings").onclick=async()=>{
+    try{const config=await operatorFetch("/api/tailscale-config");config.mint_endpoint=$("operator-endpoint").value.trim();config.ledger_auth_token=$("operator-station-token").value.trim();await operatorFetch("/api/tailscale-config",config);$("operator-station-token").value="";$("operator-config-wrap").hidden=true;await refreshOperator();$("operator-error").textContent="Server settings saved. Sign in or register.";}catch(error){$("operator-error").textContent=error.message;}
+  };
   setInterval(refreshOperator,30000);refreshOperator();
   let savedImages = [];
   let localImage = null;
@@ -830,7 +842,8 @@ all selected cards are written in parallel</footer>
   }
 
   async function refreshSavedImages() {
-    const data = await (await fetch("/api/clones")).json();
+    const response=await fetch("/api/clones");if(!response.ok)return;
+    const data = await response.json();
     const names = data.images.map(image => image.name);
     if (JSON.stringify(names) === JSON.stringify(savedImages)) return;
     savedImages = names;
@@ -1230,7 +1243,8 @@ all selected cards are written in parallel</footer>
   async function poll() {
     let data;
     try {
-      data = await (await fetch("/api/devices")).json();
+      const response=await fetch("/api/devices");if(response.status===401)return;
+      data = await response.json();
       misses = 0; $("offline").style.display = "none";
     } catch {
       if (++misses > 4) $("offline").style.display = "block";

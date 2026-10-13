@@ -59,6 +59,12 @@ def start_server():
     """Returns True if we're the one who started it (so we know it's ours
     to stop later); False if it was already running."""
     if server_up():
+        try:
+            urllib.request.urlopen(URL+"api/operator",timeout=3)
+        except urllib.error.HTTPError as error:
+            if error.code==404:
+                show_error("An older PiForge server is running. Stop it after any active operation finishes, then reopen PiForge.")
+                sys.exit(1)
         return False
     with open(LOG_PATH, "w") as log:
         # Invoke the dedicated root-helper wrapper (not "pkexec python3

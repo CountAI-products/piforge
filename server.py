@@ -1948,6 +1948,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(e)}, 400)
 
     def do_DELETE(self):
+        try:
+            if not operator_auth.current(load_tailscale_config()):raise ValueError("Sign in to use PiForge")
+        except ValueError as error:self._json({"error":str(error)},401);return
         parsed = urllib.parse.urlparse(self.path)
         name = urllib.parse.parse_qs(parsed.query).get("name", [""])[0]
         if parsed.path == "/api/partition-profiles":
