@@ -1927,6 +1927,7 @@ class Handler(BaseHTTPRequestHandler):
                     "operation": "write", "name": cfg["image_url"][7:],
                     "devices": devices, "prefix": cfg.get("hostname", "supernova"),
                     "first": cfg.get("first_number", 1),
+                    "number_hostnames": cfg.get("number_hostnames", True),
                     "tailscale": cfg.get("inject_tailscale", True),
                     "installer": cfg["installer"],
                     "operator_session":cfg["operator_session"],

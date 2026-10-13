@@ -21,7 +21,7 @@ class MainFlowTests(unittest.TestCase):
         cls.httpd.server_close()
 
     def test_usual_flash_routes_master_to_clone_with_tailscale(self):
-        payload = {'devices':['/dev/sdb'], 'config':{'image_url':'master:production', 'hostname':'mill', 'first_number':11,'inject_tailscale':True}}
+        payload = {'devices':['/dev/sdb'], 'config':{'image_url':'master:production', 'hostname':'mill', 'first_number':11,'inject_tailscale':True,'number_hostnames':False}}
         request = urllib.request.Request(self.url+'/api/flash', data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
         with patch('cloning.start') as start, patch('server.os.geteuid',return_value=0), patch('operator_auth.current',return_value={'id':1,'username':'operator'}), patch('operator_auth.token',return_value='test-session'):
             with urllib.request.urlopen(request) as response:
@@ -30,6 +30,7 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(actual['name'],'production')
             self.assertEqual(actual['first'],11)
             self.assertTrue(actual['tailscale'])
+            self.assertFalse(actual['number_hostnames'])
 
     def test_partition_request_uses_authenticated_operator_without_card_writes(self):
         payload={'devices':['/dev/test-card'],'profile':{'table':'gpt','partitions':[{'label':'data','size_mib':1024,'fstype':'ext4'}]}}

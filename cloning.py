@@ -29,7 +29,7 @@ def start(server, request):
     first = int(request.get('first', 1))
     if first < 1:
         raise ValueError('Starting number must be positive')
-    hostnames = [f'{prefix}-{first+i:03d}' for i in range(len(devices))]
+    hostnames = [f'{prefix}-{first+i:03d}' if request.get('number_hostnames', True) else prefix for i in range(len(devices))]
     if operation == 'write':
         from firstrun_gen import make_identity_firstrun
         for hostname in hostnames:
