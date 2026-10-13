@@ -1127,7 +1127,7 @@ def partition_device(dev, profile):
         log_history(dev, "", "error", time.time() - start_time, "")
 
 
-def start_partition(devices, profile):
+def start_partition(devices, profile, installer="", operator_session=""):
     with JOBS_LOCK:
         if any(JOBS.get(device, {}).get("master_image") for device in devices):
             raise ValueError("Finished-card images already contain partitions; continue to Tailscale")
@@ -1871,7 +1871,10 @@ class Handler(BaseHTTPRequestHandler):
                 profile = req["profile"]
                 if not devices:
                     raise ValueError("no devices selected")
-                start_partition(devices, profile)
+                config=load_tailscale_config()
+                user=operator_auth.current(config)
+                if not user:raise ValueError("Sign in before partitioning cards")
+                start_partition(devices,profile,user["username"],operator_auth.token(config))
                 self._json({"ok": True, "count": len(devices)})
             except Exception as e:
                 self._json({"error": str(e)}, 400)

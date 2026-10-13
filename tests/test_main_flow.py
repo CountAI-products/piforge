@@ -31,6 +31,16 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(actual['first'],11)
             self.assertTrue(actual['tailscale'])
 
+    def test_partition_request_uses_authenticated_operator_without_card_writes(self):
+        payload={'devices':['/dev/test-card'],'profile':{'table':'gpt','partitions':[{'label':'data','size_mib':1024,'fstype':'ext4'}]}}
+        request=urllib.request.Request(self.url+'/api/partition',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
+        with patch('server.os.geteuid',return_value=0),patch('operator_auth.current',return_value={'username':'operator'}),patch('operator_auth.token',return_value='test-session'),patch('server.list_devices',return_value=[{'device':'/dev/test-card'}]),patch('server.partition_device') as partition,patch.dict(server.JOBS,{},clear=True):
+            with urllib.request.urlopen(request) as response:
+                self.assertTrue(json.load(response)['ok'])
+            self.assertEqual(server.JOBS['/dev/test-card']['installer'],'operator')
+            self.assertEqual(server.JOBS['/dev/test-card']['operator_session'],'test-session')
+            server.FLASH_ACTIVE.clear()
+
     def test_finished_card_cannot_be_repartitioned(self):
         with patch.dict(server.JOBS, {'/dev/sdb':{'master_image':True}}):
             with self.assertRaisesRegex(ValueError,'already contain partitions'):
