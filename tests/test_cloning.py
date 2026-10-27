@@ -3,13 +3,61 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 import clone
 import cloning
 import server
 from firstrun_gen import make_identity_firstrun
 
 class ProductionTests(unittest.TestCase):
+    def test_e2fsprogs_1472_is_required_for_cloning(self):
+        versions = {
+            'e2fsck 1.47.0 (5-Feb-2023)': (1, 47, 0),
+            'e2fsck 1.47.2 (1-Jan-2025)': (1, 47, 2),
+            'e2fsck 1.48 (future)': (1, 48, 0),
+        }
+        for output, expected in versions.items():
+            with self.subTest(output=output), patch.object(
+                clone.subprocess, 'run', return_value=Mock(stdout='', stderr=output)
+            ):
+                self.assertEqual(clone.e2fs_version(), expected)
+
+        with patch.object(clone, 'e2fs_version', return_value=(1, 47, 0)):
+            with self.assertRaisesRegex(clone.CloneError, '1.47.2 or newer'):
+                clone.require_safe_e2fsprogs()
+        with patch.object(clone, 'e2fs_version', return_value=(1, 47, 2)):
+            clone.require_safe_e2fsprogs()
+
+    def test_clone_hardening_disables_orphan_file_offline(self):
+        results = [
+            Mock(returncode=0, stdout=''),
+            Mock(returncode=0, stdout='Filesystem features: has_journal orphan_file extent\n'),
+            Mock(returncode=0, stdout=''),
+            Mock(returncode=1, stdout=''),
+            Mock(returncode=0, stdout='Filesystem features: has_journal extent\n'),
+        ]
+        with patch.object(clone, 'run', side_effect=results) as run:
+            clone.harden_ext4_partition('/dev/sdb2')
+        self.assertEqual(run.call_args_list, [
+            call(['e2fsck', '-fy', '/dev/sdb2'], check=False),
+            call(['tune2fs', '-l', '/dev/sdb2']),
+            call(['tune2fs', '-O', '^orphan_file', '/dev/sdb2']),
+            call(['e2fsck', '-fy', '/dev/sdb2'], check=False),
+            call(['tune2fs', '-l', '/dev/sdb2']),
+        ])
+
+    def test_clone_hardening_rejects_persistent_orphan_feature(self):
+        results = [
+            Mock(returncode=0, stdout=''),
+            Mock(returncode=0, stdout='Filesystem features: orphan_file extent\n'),
+            Mock(returncode=0, stdout=''),
+            Mock(returncode=0, stdout=''),
+            Mock(returncode=0, stdout='Filesystem features: orphan_present extent\n'),
+        ]
+        with patch.object(clone, 'run', side_effect=results):
+            with self.assertRaisesRegex(clone.CloneError, 'orphan_present'):
+                clone.harden_ext4_partition('/dev/sdb2')
+
     def test_unsupported_layout_rejected(self):
         with self.assertRaises(clone.CloneError):
             clone.validate_layout([{'num':1,'fstype':'ext4'},{'num':2,'fstype':'vfat'}])

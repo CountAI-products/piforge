@@ -520,6 +520,11 @@ enrollment, dashboard finalization and required physical-device checks.
 PiForge saves a reusable, checksummed block map inside each image's .json file.
 Older images generate it once on their first burn. Subsequent burns copy mapped
 blocks without scanning source ext4 inodes; target filesystem checks remain.
+PiForge requires cloning-station e2fsprogs 1.47.2 or newer. After writing, it
+checks every cloned ext4 partition, disables `orphan_file` offline, then checks
+again. This prevents Bookworm's e2fsck 1.47.0 from entering its known broken
+orphan recovery path after an unexpected power loss without upgrading the Pi's
+operating system.
 Share .img + .json together or create a sparse compressed archive using:
 
 ```bash

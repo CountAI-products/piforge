@@ -8,8 +8,11 @@ clone.py — save a finished SD card as an image, and write exact copies of it.
   write  image -> one card: same partition table (same disk ID, so PARTUUIDs
          in cmdline.txt / fstab stay valid), same data
 
-Requires e2fsprogs >= 1.47 for filesystem verification. The last ext4
-partition is shrunk when saving and grown to fill the target when writing.
+Requires e2fsprogs >= 1.47.2 for safe orphan-file recovery and filesystem
+verification. The last ext4 partition is shrunk when saving and grown to fill
+the target when writing. Cloned ext4 filesystems have the orphan_file feature
+disabled offline so Bookworm's e2fsck 1.47.0 cannot hit its known recovery bug
+after an unexpected power loss.
 Production copies require --hostname. Tailscale enrollment is performed
 separately with the existing per-card provisioning workflow after cloning.
 
@@ -74,12 +77,23 @@ def run(cmd, check=True, **kw):
     return r
 
 
-def e2fs_can_resize():
-    """e2fsck/resize2fs >= 1.47 understand current Pi OS ext4 (orphan_file);
-    older ones refuse to check or resize it."""
-    out = subprocess.run(["e2fsck", "-V"], capture_output=True, text=True).stderr
-    m = re.search(r"(\d+)\.(\d+)", out)
-    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (1, 47)
+def e2fs_version():
+    """Return the installed e2fsck version as a three-item tuple."""
+    result = subprocess.run(["e2fsck", "-V"], capture_output=True, text=True)
+    match = re.search(r"e2fsck\s+(\d+)\.(\d+)(?:\.(\d+))?", result.stdout + result.stderr)
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(value or 0) for value in match.groups())
+
+
+def require_safe_e2fsprogs():
+    version = e2fs_version()
+    if version < (1, 47, 2):
+        found = ".".join(str(value) for value in version)
+        raise CloneError(
+            f"Cloning requires e2fsprogs 1.47.2 or newer; found {found}. "
+            "Versions 1.47.0 and 1.47.1 can corrupt orphan_file recovery after power loss."
+        )
 
 
 def image_paths(name):
@@ -229,11 +243,41 @@ def settle(dev):
         run(["blockdev", "--flushbufs", path], check=False)
 
 
+def filesystem_features(partition):
+    result = run(["tune2fs", "-l", partition])
+    match = re.search(r"^Filesystem features:\s*(.*)$", result.stdout, re.MULTILINE)
+    if not match:
+        raise CloneError(f"Cannot read ext4 features from {partition}")
+    return set(match.group(1).split())
+
+
+def harden_ext4_partition(partition):
+    """Make an unmounted clone safe for Bookworm's boot-time e2fsck 1.47.0."""
+    result = run(["e2fsck", "-fy", partition], check=False)
+    if result.returncode not in (0, 1):
+        raise CloneError(f"Filesystem repair failed on {partition}")
+
+    features = filesystem_features(partition)
+    if "orphan_file" in features:
+        say(f"{partition}: disabling ext4 orphan_file for power-loss-safe Bookworm recovery")
+        run(["tune2fs", "-O", "^orphan_file", partition])
+        result = run(["e2fsck", "-fy", partition], check=False)
+        if result.returncode not in (0, 1):
+            raise CloneError(f"Filesystem repair after disabling orphan_file failed on {partition}")
+        remaining = filesystem_features(partition)
+        unsafe = remaining.intersection({"orphan_file", "orphan_present"})
+        if unsafe:
+            raise CloneError(
+                f"Failed to remove unsafe ext4 features from {partition}: {', '.join(sorted(unsafe))}"
+            )
+    else:
+        say(f"{partition}: ext4 orphan_file is already disabled")
+
+
 # ---------------------------------------------------------------- read
 def read_master(dev, name):
     check_card(dev)
-    if not e2fs_can_resize():
-        raise CloneError("Cloning requires e2fsprogs 1.47+ for filesystem verification")
+    require_safe_e2fsprogs()
     img, meta_path = image_paths(name)
     if os.path.exists(img):
         raise CloneError(f"an image called {name!r} already exists — delete it or pick another name")
@@ -265,7 +309,7 @@ def read_master(dev, name):
     last = max(parts, key=lambda p: p["start"])
     sizes = {}
     shrunk = False
-    if last["fstype"] == "ext4" and e2fs_can_resize():
+    if last["fstype"] == "ext4":
         step("shrink")
         part_file = img + ".lastpart"
         with open(part_file, "wb") as f:
@@ -296,10 +340,6 @@ def read_master(dev, name):
                 shrunk = True
         finally:
             os.remove(part_file)
-    elif last["fstype"] == "ext4":
-        say("This PC's e2fsprogs is older than 1.47: the last partition is kept at the master's size, "
-            "so every copy needs a card at least as big as the master.")
-
     # The partition table last: e2image cuts a file target off at the end of
     # the filesystem it copied, which would take the logical partitions' EBRs
     # (inside the extended partition) with it.
@@ -330,8 +370,7 @@ def write_copy(dev, name, hostname=None):
         raise CloneError("A unique hostname is required for production clones")
     make_identity_firstrun(hostname)
     check_card(dev)
-    if not e2fs_can_resize():
-        raise CloneError("Cloning requires e2fsprogs 1.47+ for filesystem verification")
+    require_safe_e2fsprogs()
     img, meta_path = image_paths(name)
     with open(meta_path) as f:
         meta = json.load(f)
@@ -340,10 +379,6 @@ def write_copy(dev, name, hostname=None):
     if card_bytes < meta["min_card_bytes"]:
         raise CloneError(f"{dev} is {card_bytes / (1 << 30):.1f} GiB — this image needs at least "
                          f"{meta['min_card_bytes'] / (1 << 30):.1f} GiB")
-    if meta.get("grow_last") and not e2fs_can_resize():
-        raise CloneError("this image's last partition was shrunk when it was saved, and this PC's e2fsprogs "
-                         "(older than 1.47) can't grow it back — the copy would have a full /home. "
-                         "Write it from a PC with Ubuntu 24.04 or newer.")
     step("map")
     mapping = blockmap.ensure(img, meta_path, map_progress("map"))
     unmount_all(dev)
@@ -380,7 +415,6 @@ def write_copy(dev, name, hostname=None):
     run(["sync"])
     settle(dev)
 
-    can_check = e2fs_can_resize()
     if grow:
         step("grow")
         lp = part_path(dev, last["num"])
@@ -388,16 +422,16 @@ def write_copy(dev, name, hostname=None):
         if result.returncode not in (0, 1):
             raise CloneError("Cannot grow a filesystem that failed its check")
         run(["resize2fs", lp])
+    step("harden")
+    ext4_partitions = [part_path(dev, p["num"]) for p in parts if fstypes.get(p["num"]) == "ext4"]
+    for partition in ext4_partitions:
+        harden_ext4_partition(partition)
     step("verify")
-    if can_check:
-        for p in parts:
-            if fstypes.get(p["num"]) == "ext4":
-                r = run(["e2fsck", "-fn", part_path(dev, p["num"])], check=False)
-                if r.returncode != 0:
-                    raise CloneError(f"filesystem check failed on p{p['num']} of the copy")
-        say("Every ext4 partition on the copy checks clean.")
-    else:
-        say("Filesystem check skipped (e2fsprogs older than 1.47 can't check current Pi OS ext4).")
+    for partition in ext4_partitions:
+        result = run(["e2fsck", "-fn", partition], check=False)
+        if result.returncode != 0:
+            raise CloneError(f"Filesystem verification failed on {partition}")
+    say("Every ext4 partition checks clean and is safe from the Bookworm orphan_file recovery bug.")
     if hostname:
         step("identity")
         give_identity(dev, hostname)

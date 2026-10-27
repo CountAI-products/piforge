@@ -12,7 +12,9 @@ Remove production records, camera captures, licenses and device registration
 from the template according to your application requirements. Do not enable
 overlayroot yet. Do not enroll the master in Tailscale. Shut down cleanly.
 
-On Ubuntu install Python 3, e2fsprogs 1.47+, util-linux, parted and udev.
+On the cloning station install Python 3, e2fsprogs 1.47.2+, util-linux,
+parted and udev. PiForge refuses cloning with e2fsprogs 1.47.0 or 1.47.1
+because those versions contain unsafe `orphan_file` recovery behavior.
 Run `sudo python3 server.py` and open http://127.0.0.1:47823/.
 Click the top-bar disc icon to open Make image from card. Select only the
 master reader, enter its image name, then click Make image from selected card.
@@ -21,8 +23,11 @@ partition and partition 2 the OS root. Unsupported layouts are not converted.
 All data partitions are preserved. ext4 copies use e2image used-block copying;
 other filesystems are copied in full. Only the last ext4 partition is shrunk
 and regrown, so earlier large partitions still impose a minimum card capacity.
-The original master is not resized or changed. Clones receive filesystem
-checks, not a byte-for-byte readback or application acceptance test.
+The original master is not resized or changed. Every cloned ext4 partition is
+checked, has `orphan_file` disabled while unmounted, and is checked again. This
+keeps Bookworm's boot-time e2fsck 1.47.0 away from its known recovery failure
+after an unexpected power cut. Clones receive filesystem checks, not a
+byte-for-byte readback or application acceptance test.
 
 ## Production batches
 
