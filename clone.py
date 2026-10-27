@@ -8,11 +8,11 @@ clone.py — save a finished SD card as an image, and write exact copies of it.
   write  image -> one card: same partition table (same disk ID, so PARTUUIDs
          in cmdline.txt / fstab stay valid), same data
 
-Requires e2fsprogs >= 1.47.2 for safe orphan-file recovery and filesystem
-verification. The last ext4 partition is shrunk when saving and grown to fill
-the target when writing. Cloned ext4 filesystems have the orphan_file feature
-disabled offline so Bookworm's e2fsck 1.47.0 cannot hit its known recovery bug
-after an unexpected power loss.
+Requires e2fsprogs >= 1.47 for filesystem verification and offline feature
+management. The last ext4 partition is shrunk when saving and grown to fill the
+target when writing. Cloned ext4 filesystems are fully checked and have the
+orphan_file feature disabled offline so Bookworm's boot-time e2fsck 1.47.0
+cannot hit its known recovery bug after an unexpected power loss.
 Production copies require --hostname. Tailscale enrollment is performed
 separately with the existing per-card provisioning workflow after cloning.
 
@@ -86,13 +86,13 @@ def e2fs_version():
     return tuple(int(value or 0) for value in match.groups())
 
 
-def require_safe_e2fsprogs():
+def require_clone_e2fsprogs():
     version = e2fs_version()
-    if version < (1, 47, 2):
+    if version < (1, 47, 0):
         found = ".".join(str(value) for value in version)
         raise CloneError(
-            f"Cloning requires e2fsprogs 1.47.2 or newer; found {found}. "
-            "Versions 1.47.0 and 1.47.1 can corrupt orphan_file recovery after power loss."
+            f"Cloning requires e2fsprogs 1.47 or newer; found {found}. "
+            "PiForge uses a full offline check before removing orphan_file from each clone."
         )
 
 
@@ -277,7 +277,7 @@ def harden_ext4_partition(partition):
 # ---------------------------------------------------------------- read
 def read_master(dev, name):
     check_card(dev)
-    require_safe_e2fsprogs()
+    require_clone_e2fsprogs()
     img, meta_path = image_paths(name)
     if os.path.exists(img):
         raise CloneError(f"an image called {name!r} already exists — delete it or pick another name")
@@ -370,7 +370,7 @@ def write_copy(dev, name, hostname=None):
         raise CloneError("A unique hostname is required for production clones")
     make_identity_firstrun(hostname)
     check_card(dev)
-    require_safe_e2fsprogs()
+    require_clone_e2fsprogs()
     img, meta_path = image_paths(name)
     with open(meta_path) as f:
         meta = json.load(f)

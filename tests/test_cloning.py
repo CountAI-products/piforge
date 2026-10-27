@@ -10,8 +10,9 @@ import server
 from firstrun_gen import make_identity_firstrun
 
 class ProductionTests(unittest.TestCase):
-    def test_e2fsprogs_1472_is_required_for_cloning(self):
+    def test_e2fsprogs_147_is_required_for_cloning(self):
         versions = {
+            'e2fsck 1.46.5 (30-Dec-2021)': (1, 46, 5),
             'e2fsck 1.47.0 (5-Feb-2023)': (1, 47, 0),
             'e2fsck 1.47.2 (1-Jan-2025)': (1, 47, 2),
             'e2fsck 1.48 (future)': (1, 48, 0),
@@ -22,11 +23,11 @@ class ProductionTests(unittest.TestCase):
             ):
                 self.assertEqual(clone.e2fs_version(), expected)
 
+        with patch.object(clone, 'e2fs_version', return_value=(1, 46, 5)):
+            with self.assertRaisesRegex(clone.CloneError, '1.47 or newer'):
+                clone.require_clone_e2fsprogs()
         with patch.object(clone, 'e2fs_version', return_value=(1, 47, 0)):
-            with self.assertRaisesRegex(clone.CloneError, '1.47.2 or newer'):
-                clone.require_safe_e2fsprogs()
-        with patch.object(clone, 'e2fs_version', return_value=(1, 47, 2)):
-            clone.require_safe_e2fsprogs()
+            clone.require_clone_e2fsprogs()
 
     def test_clone_hardening_disables_orphan_file_offline(self):
         results = [

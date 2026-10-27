@@ -12,9 +12,10 @@ Remove production records, camera captures, licenses and device registration
 from the template according to your application requirements. Do not enable
 overlayroot yet. Do not enroll the master in Tailscale. Shut down cleanly.
 
-On the cloning station install Python 3, e2fsprogs 1.47.2+, util-linux,
-parted and udev. PiForge refuses cloning with e2fsprogs 1.47.0 or 1.47.1
-because those versions contain unsafe `orphan_file` recovery behavior.
+On the cloning station install Python 3, e2fsprogs 1.47+, util-linux, parted
+and udev. Ubuntu 24.04's stock e2fsprogs 1.47.0 is supported: PiForge performs
+a forced full check offline before removing `orphan_file`; it does not use the
+affected boot-time journal-only recovery path.
 Run `sudo python3 server.py` and open http://127.0.0.1:47823/.
 Click the top-bar disc icon to open Make image from card. Select only the
 master reader, enter its image name, then click Make image from selected card.

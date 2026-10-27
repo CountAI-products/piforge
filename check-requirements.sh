@@ -44,11 +44,11 @@ fi
 
 echo
 e2fs_version="$(e2fsck -V 2>&1 | sed -n 's/^e2fsck \([0-9][0-9.]*\).*/\1/p' | head -1)"
-lowest_version="$(printf '%s\n' 1.47.2 "$e2fs_version" | sort -V | head -1)"
-if [ -n "$e2fs_version" ] && [ "$lowest_version" = 1.47.2 ]; then
+lowest_version="$(printf '%s\n' 1.47 "$e2fs_version" | sort -V | head -1)"
+if [ -n "$e2fs_version" ] && [ "$lowest_version" = 1.47 ]; then
     echo "  OK   e2fsprogs $e2fs_version (clone-safe)"
 else
-    echo "  MISS e2fsprogs 1.47.2+ required for power-loss-safe cloning (found ${e2fs_version:-unknown})"
+    echo "  MISS e2fsprogs 1.47+ required for power-loss-safe cloning (found ${e2fs_version:-unknown})"
     ok=0
 fi
 
