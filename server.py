@@ -1234,8 +1234,8 @@ def start_flash(devices, cfg):
 
 TAILSCALE_SERVICE_UNIT = """[Unit]
 Description=PiForge: join Tailscale with per-card provisioned key (first boot only)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
 
 [Service]
 Type=oneshot
@@ -1329,20 +1329,112 @@ fi
 # serial-based one, so each card's Tailscale identity matches what's on the
 # label.
 HOST="$(hostname)"
-echo "bringing up tailscale as ${HOST}"
-tailscale up \
-  --authkey="$AUTHKEY" \
-  --hostname="$HOST" \
-  --advertise-tags=__TAILSCALE_TAG__ \
-  --ssh=true \
-  --accept-routes=true \
-  || fail "tailscale up failed (key expired >24h? already used?)"
+
+# Tailscale device name must be unique across the tailnet, even though every
+# card keeps the same Linux hostname/username ("supernova"). When hundreds of
+# nodes share one hostname, control runs out of auto-numbered MagicDNS names
+# (supernova-1..N); a node that gets no name also gets an empty login profile,
+# tailscaled never persists the login, and the card is logged out after its
+# first reboot. So derive the Tailscale name from the Pi's hardware serial
+# (stable per board, printed on it) and leave the OS hostname untouched.
+PI_SERIAL="$(tr -d '\0' < /sys/firmware/devicetree/base/serial-number 2>/dev/null || true)"
+[[ -n "$PI_SERIAL" ]] || PI_SERIAL="$(awk '/^Serial/{print $3}' /proc/cpuinfo 2>/dev/null || true)"
+[[ -n "$PI_SERIAL" ]] || PI_SERIAL="$(cat /etc/machine-id 2>/dev/null || true)"
+PI_SERIAL="$(printf '%s' "$PI_SERIAL" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')"
+[[ -n "$PI_SERIAL" ]] || fail "could not determine a unique id (no Pi serial / machine-id)"
+TS_NAME="${HOST}-${PI_SERIAL: -8}"
+echo "linux hostname: ${HOST}  |  tailscale device name: ${TS_NAME}"
+
+# Wait for the real wall-clock time BEFORE logging in. The Pi has no RTC
+# battery, so it boots on fake-hwclock's stale image time and NTP later jumps
+# the clock forward (weeks, on a freshly flashed card). When that jump lands
+# in the middle of `tailscale up`, tailscaled keeps the login only in memory
+# ("active login: <missing-profile>", "profile not found"): tailscaled.state
+# holds nothing but _machinekey, and the very first reboot comes up logged
+# out. The auth key is single-use, so the login has to persist the first time.
+SYNC_OK=0
+for i in $(seq 1 60); do
+  if [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == "yes" ]]; then
+    SYNC_OK=1; break
+  fi
+  [[ $((i % 6)) -eq 0 ]] && echo "waiting for NTP clock sync... (${i}0s)"
+  sleep 5
+done
+if [[ "$SYNC_OK" == "1" ]]; then
+  echo "clock synchronized: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+else
+  echo "WARNING: clock not NTP-synchronized after 5min — continuing; persistence check below will catch a lost login"
+fi
+
+# A persisted login has _current-profile/_profiles in tailscaled.state; a lost
+# one leaves only _machinekey.
+login_persisted() {
+  python3 -I - <<'PERSIST_CHECK'
+import json, sys
+try:
+    with open("/var/lib/tailscale/tailscaled.state") as f:
+        keys = json.load(f).keys()
+except Exception:
+    sys.exit(1)
+sys.exit(0 if {"_current-profile", "_profiles"} <= set(keys) else 1)
+PERSIST_CHECK
+}
+ts_running() {
+  tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'
+}
+
+if login_persisted && ts_running; then
+  # A retry of this service after a later step failed: the card is already
+  # joined and its login is on disk. Don't restart tailscaled or re-run
+  # `tailscale up` (the auth key is single-use anyway) — just finish up.
+  echo "tailscale already logged in and persisted — skipping restart/login"
+else
+  # tailscaled started on the stale pre-sync clock; restart it so the login
+  # happens in a daemon that has only ever seen the correct time.
+  systemctl restart tailscaled
+  for i in $(seq 1 30); do
+    tailscale status --json >/dev/null 2>&1 && break
+    sleep 1
+  done
+
+  echo "bringing up tailscale as ${TS_NAME}"
+  tailscale up \
+    --authkey="$AUTHKEY" \
+    --hostname="$TS_NAME" \
+    --advertise-tags=__TAILSCALE_TAG__ \
+    --ssh=true \
+    --accept-routes=true \
+    || fail "tailscale up failed (key expired >24h? already used?)"
+fi
 unset AUTHKEY
+
+# Confirm the login was actually written to disk, not just held in memory.
+# Without this check the script would report success and self-destruct, and
+# the card would be logged out after a reboot.
+PERSISTED=0
+for i in $(seq 1 45); do
+  if login_persisted; then PERSISTED=1; break; fi
+  sleep 2
+done
+if [[ "$PERSISTED" != "1" ]]; then
+  echo "tailscale login not on disk yet — nudging a prefs write"
+  tailscale set --hostname="$TS_NAME" 2>/dev/null || true
+  sleep 5
+  login_persisted && PERSISTED=1
+fi
+[[ "$PERSISTED" == "1" ]] \
+  || fail "tailscale is up but the login was NOT saved to /var/lib/tailscale/tailscaled.state — it will be logged out after reboot; re-provision this card"
+sync
+echo "tailscale login persisted to disk"
 
 # Confirm the exact card token/key against its actual Tailscale node. No user
 # password, station secret or operator session is placed on the Pi.
+# Best-effort: the Tailscale login is already complete and persisted above, so
+# a slow or rejecting mint server (timeout / HTTP 409) must not fail the whole
+# provision — that would leave the key files on the card and make systemd
+# re-run this script every 30s forever. Log it for follow-up and carry on.
 if [[ -f "$D/join-url" ]]; then
-python3 - <<'JOIN_REPORT'
+if ! python3 - <<'JOIN_REPORT'
 import json, subprocess, urllib.request
 from pathlib import Path
 folder=Path('/etc/pi-provision')
@@ -1354,6 +1446,11 @@ request=urllib.request.Request((folder/'join-url').read_text().strip(),data=json
 with urllib.request.urlopen(request,timeout=30) as response:
     if not json.load(response).get('ok'):raise RuntimeError('Join report rejected')
 JOIN_REPORT
+then
+  echo "WARNING: join report to $(cat "$D/join-url" 2>/dev/null) failed (see error above) — tailscale is joined and persisted; continuing"
+else
+  echo "join report accepted"
+fi
 fi
 
 shred -u "$D/authkey.gpg" 2>/dev/null || rm -f "$D/authkey.gpg"
@@ -1367,7 +1464,7 @@ rm -f /etc/systemd/system/multi-user.target.wants/tailscale-provision.service \
       /etc/systemd/system/tailscale-provision.service
 systemctl daemon-reload || true
 rm -f /usr/local/sbin/firstboot-tailscale.sh
-echo "PROVISION OK: joined tailnet as ${HOST}"
+echo "PROVISION OK: joined tailnet as ${TS_NAME} (linux hostname ${HOST})"
 """
 
 
